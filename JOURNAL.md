@@ -1,0 +1,116 @@
+# DCN Designer — Journal
+
+Running log of progress notes that don't fit cleanly into [PROJECT_PLAN.md](PROJECT_PLAN.md)'s
+session log:
+
+- **Open items / deferred decisions** — flagged for later, not yet resolved
+- **Errors / failures** — symptom, root cause, fix, lesson
+- **Lessons / patterns** — reusable knowledge to remember next time
+
+PROJECT_PLAN.md remains the source of truth for the phase plan, decisions table, and per-session
+work log. This file is for the orthogonal axis: what's open, what bit us, what to remember the
+next time we hit a similar shape of problem.
+
+**Conventions**
+
+- Add new entries at the top of each section.
+- Date in ISO format (`YYYY-MM-DD`).
+- When an open item is resolved, move it to **Resolved (recent)** with a one-line note pointing at
+  where the resolution lives (PROJECT_PLAN.md row, commit, etc.). Prune Resolved to the last
+  ~10 entries periodically — historical context lives in git history.
+- Don't duplicate the PROJECT_PLAN.md session log. If a fact is captured there, just reference it.
+
+---
+
+## Open items / deferred decisions
+
+### 2026-05-12 — When does the "any updates to switches?" prompt fire?
+- **Context:** User asked the app to prompt for switch library updates "near the beginning of the
+  user's workflow." Default-parked at: banner on project-open with skip / "review library"
+  buttons.
+- **Why open:** UI location isn't built yet; touches Requirements screen flow.
+- **Revisit:** Phase 3 (Requirements screen).
+
+### 2026-05-11 — Electron Forge vs electron-builder for packaging
+- **Context:** PROJECT_PLAN.md tech-stack table specifies Electron Forge. Phase 0 used
+  `electron-vite` + `electron-builder` for cleaner dev ergonomics. Only matters at packaging time.
+- **Why open:** Re-evaluating now would be premature; both can ship the same app.
+- **Revisit:** Phase 10 (Polish + packaging) — confirm choice and migrate if needed.
+
+### 2026-05-11 — git init?
+- **Context:** Repo is not yet a git repository. CLAUDE.md notes: "Before any non-trivial change,
+  ask whether to `git init` and tag the existing v8 as a baseline." Phases 0 and 1 added ~50
+  source files and `node_modules/`.
+- **Why open:** Asked once in phase 0; user did not respond — proceeded without git. Worth
+  re-asking before phase 2.
+- **Revisit:** Top of next session — propose `git init` and `git tag v8-baseline` on the v8 xlsx
+  + scripts state before adding solver code.
+
+### 2026-05-11 — npm audit reports 12 vulnerabilities (10 high)
+- **Context:** All in transitive build-chain dependencies (electron-builder / electron-vite
+  pulls). Not affecting runtime.
+- **Revisit:** Before packaging phase, or when one upstream dep majors.
+
+---
+
+## Resolved (recent)
+
+_None yet._
+
+---
+
+## Errors / failures and resolutions
+
+### 2026-05-12 — Renderer blank in browser preview after phase 1
+- **Symptom:** `localhost:5173` showed a blank page; React error boundary warnings: "An error
+  occurred in the `<WorkspacePicker>` component."
+- **Root cause:** `WorkspacePicker.useEffect` called `window.dcn.defaultWorkspacePath()`. In
+  Electron, `window.dcn` is injected by preload; in a plain browser preview it's `undefined`,
+  so the property access threw `TypeError` synchronously (before the `.catch()` could run).
+- **Fix:** Added an `isElectron` guard in WorkspacePicker. Added a dev-only
+  `installMockDcn()` ([src/renderer/src/dev/install-mock-dcn.ts](src/renderer/src/dev/install-mock-dcn.ts))
+  gated by `import.meta.env.DEV` and dynamically imported in main.tsx. Vite tree-shakes the
+  import in production builds (verified: zero mock-content occurrences in built JS).
+- **Lesson:** see "Browser-mode dev mock pattern" below.
+
+### 2026-05-11 — `tsc` cannot find `@tailwindcss/vite` types
+- **Symptom:** `npm run typecheck` failed: "Cannot find module '@tailwindcss/vite' or its
+  corresponding type declarations" pointing at `dist/index.d.mts`.
+- **Root cause:** Base `@electron-toolkit/tsconfig/tsconfig.node.json` sets
+  `moduleResolution: "node"` (legacy CommonJS resolver), which can't resolve `.mts` ESM-only
+  type declarations.
+- **Fix:** Overrode `moduleResolution: "bundler"` and `module: "esnext"` in
+  [tsconfig.node.json](tsconfig.node.json).
+- **Lesson:** When extending `@electron-toolkit/tsconfig`, expect to override resolution for
+  any ESM-only deps.
+
+---
+
+## Lessons / patterns
+
+### 2026-05-12 — Browser-mode dev mock pattern (for Electron apps)
+For Electron apps where the renderer depends on preload-injected APIs (`window.dcn`,
+`window.electron`, etc.), keep the renderer browser-runnable for fast iteration:
+
+1. Where the renderer touches the preload API at component-entry boundaries, compute
+   `const isElectron = typeof window !== 'undefined' && Boolean(window.dcn)` and short-circuit
+   if false.
+2. Provide a dev-only mock module that installs a stub on `window.dcn` if missing; import it
+   from `main.tsx` inside `if (import.meta.env.DEV) { await import(...) }`. Vite drops the
+   import entirely from production bundles.
+3. After every prod build, `grep` the renderer bundle for an obvious marker from the mock
+   (e.g. a placeholder workspace path) to confirm tree-shaking actually dropped it.
+
+This lets browser preview tools (screenshot, click, eval) cover most of the UI, while the
+real `window.dcn` from preload powers Electron — no production-time dead code.
+
+### 2026-05-11 — Per-question interview style
+User strongly prefers interviewing-style decisions one question at a time (captured in
+auto-memory as `feedback_interview_one_question_at_a_time.md`). Each question should:
+
+- Cover one decision only
+- Offer 2–3 multiple-choice options
+- Include a recommended default with brief reasoning
+
+Batching 4 questions into a table — even with options — is wrong. Wait for each answer before
+asking the next; later answers may change earlier ones.

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "renderer-only",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--config", "electron.vite.config.ts", "--mode", "development", "src/renderer"],
+      "port": 5173
+    }
+  ]
+}

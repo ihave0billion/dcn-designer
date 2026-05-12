@@ -1,0 +1,33 @@
+node_modules/
+out/
+dist/
+release/
+.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Excel lockfiles
+.~lock.*#
+
+# Legacy v8 spreadsheet (lives on disk for reference, not part of the app repo)
+*.xlsx
+Deliverables/
+
+# Claude Code local-only settings
+.claude/settings.local.json

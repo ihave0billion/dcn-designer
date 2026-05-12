@@ -1,0 +1,988 @@
+# DCN Designer — switches library seed
+#
+# One-time manual transcription from N9K.md (the authoritative source).
+# After first run, copied into ~/DCN-Designer/library/switches.yaml and
+# edited via the Library UI or hand-edits to that file.
+#
+# Fields:
+#   id                : Cisco product ID (matches a row in N9K.md)
+#   role              : spine | leaf | both
+#   category          : grouping label for the library UI
+#   primary           : main port group (host-facing for leaves, downlinks for spines)
+#   uplink            : higher-speed uplink group (leaves), or null
+#   secondary_uplink  : secondary uplink group when present, or null
+#   capabilities      : flat boolean record
+#   aci_note          : free text when ACI support has nuance N9K.md spells out
+#   availability      : available | future | eos
+#   available_from    : ISO-ish hint when availability != available
+#
+# Many ru / power_w / data_sheet_url fields are null because N9K.md does
+# not specify them. Fill in via the Library UI or data sheets later.
+
+schema_version: 1
+switches:
+
+  # ──────────────────────────────────────────────────────────────────
+  # 100G spine/leaf (ACI capable)
+  # ──────────────────────────────────────────────────────────────────
+  - id: N9K-C9364C-H1
+    model_display: Nexus 9364C-H1
+    vendor: Cisco
+    role: both
+    category: "100G"
+    primary:
+      ports: 64
+      speed_g: 100
+      speed_options_g: [100]
+      naming_template: "Eth1/{1..64}"
+    uplink: null
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: QSFP28
+    capabilities:
+      aci_leaf: true
+      aci_spine: true
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9K-C93600CD-GX
+    model_display: Nexus 93600CD-GX
+    vendor: Cisco
+    role: both
+    category: "100G"
+    primary:
+      ports: 28
+      speed_g: 100
+      speed_options_g: [100]
+      naming_template: "Eth1/{1..28}"
+    uplink:
+      ports: 8
+      speed_g: 400
+      speed_options_g: [400]
+      naming_template: "Eth1/{29..36}"
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: QSFP28 (primary) / QSFP-DD (uplink)
+    capabilities:
+      aci_leaf: true
+      aci_spine: true
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: "ACI Spine support per data sheet table 3."
+    asic: null
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9336C-SE1
+    model_display: Nexus 9336C-SE1
+    vendor: Cisco
+    role: both
+    category: "100G"
+    primary:
+      ports: 36
+      speed_g: 100
+      speed_options_g: [100]
+      naming_template: "Eth1/{1..36}"
+    uplink: null
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: QSFP28
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: "E100 (SE1)"
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9324C-SE1U
+    model_display: Nexus 9324C-SE1U Smart Switch
+    vendor: Cisco
+    role: leaf
+    category: "100G"
+    primary:
+      ports: 24
+      speed_g: 100
+      speed_options_g: [100]
+      naming_template: "Eth1/{1..24}"
+    uplink: null
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: QSFP28
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: true
+      ult_low_latency: false
+      poe: false
+      macsec: true
+      hpc: false
+      ai_ml: false
+      dpu_integrated: true
+    aci_note: "ACI support is for Zone-Based Firewall or DCI only, not ACI Leaf."
+    asic: "E100 (SE1U)"
+    availability: available
+    available_from: null
+    notes: "Integrated 800G DPU firewall."
+    data_sheet_url: null
+    attachments: []
+
+  # ──────────────────────────────────────────────────────────────────
+  # 400G spine/leaf (ACI capable)
+  # ──────────────────────────────────────────────────────────────────
+  - id: N9K-C9364D-GX2A
+    model_display: Nexus 9364D-GX2A
+    vendor: Cisco
+    role: both
+    category: "400G"
+    primary:
+      ports: 64
+      speed_g: 400
+      speed_options_g: [400]
+      naming_template: "Eth1/{1..64}"
+    uplink: null
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: QSFP-DD
+    capabilities:
+      aci_leaf: true
+      aci_spine: true
+      nxos: true
+      rocev2: true
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: true
+      ai_ml: true
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9K-C9348D-GX2A
+    model_display: Nexus 9348D-GX2A
+    vendor: Cisco
+    role: both
+    category: "400G"
+    primary:
+      ports: 48
+      speed_g: 400
+      speed_options_g: [400]
+      naming_template: "Eth1/{1..48}"
+    uplink: null
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: QSFP-DD
+    capabilities:
+      aci_leaf: true
+      aci_spine: true
+      nxos: true
+      rocev2: true
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: true
+      hpc: true
+      ai_ml: true
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9K-C9332D-GX2B
+    model_display: Nexus 9332D-GX2B
+    vendor: Cisco
+    role: both
+    category: "400G"
+    primary:
+      ports: 32
+      speed_g: 400
+      speed_options_g: [400]
+      naming_template: "Eth1/{1..32}"
+    uplink: null
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: QSFP-DD
+    capabilities:
+      aci_leaf: true
+      aci_spine: true
+      nxos: true
+      rocev2: true
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: true
+      ai_ml: true
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9K-C9332D-H2R
+    model_display: Nexus 9332D-H2R
+    vendor: Cisco
+    role: both
+    category: "400G"
+    primary:
+      ports: 32
+      speed_g: 400
+      speed_options_g: [400]
+      naming_template: "Eth1/{1..32}"
+    uplink: null
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: QSFP-DD
+    capabilities:
+      aci_leaf: true
+      aci_spine: true
+      nxos: true
+      rocev2: false
+      deep_buffer: true
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: true
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: "ACI Spine requires MODE-ACI-SPINE selection at ordering time."
+    asic: null
+    availability: available
+    available_from: null
+    notes: "Deep buffer: 80MB on-die packet buffer."
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9K-C9316D-GX
+    model_display: Nexus 9316D-GX
+    vendor: Cisco
+    role: both
+    category: "400G"
+    primary:
+      ports: 16
+      speed_g: 400
+      speed_options_g: [400]
+      naming_template: "Eth1/{1..16}"
+    uplink: null
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: QSFP-DD
+    capabilities:
+      aci_leaf: true
+      aci_spine: true
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: "ACI Spine support per data sheet table 3."
+    asic: null
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  # ──────────────────────────────────────────────────────────────────
+  # 800G spine (roadmap — ACI capable)
+  # ──────────────────────────────────────────────────────────────────
+  - id: N9364E-SP2R-O
+    model_display: Nexus 9364E-SP2R-O
+    vendor: Cisco
+    role: spine
+    category: "800G"
+    primary:
+      ports: 64
+      speed_g: 800
+      speed_options_g: [800]
+      naming_template: "Eth1/{1..64}"
+    uplink: null
+    secondary_uplink: null
+    ru: 2
+    power_w: null
+    optic_hint: OSFP
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: "ACI support not stated in source; verify against data sheet at GA."
+    asic: null
+    availability: future
+    available_from: "2026-H2"
+    notes: "Not orderable until 2H CY26."
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9364E-SP2R-Q
+    model_display: Nexus 9364E-SP2R-Q
+    vendor: Cisco
+    role: spine
+    category: "800G"
+    primary:
+      ports: 64
+      speed_g: 800
+      speed_options_g: [800]
+      naming_template: "Eth1/{1..64}"
+    uplink: null
+    secondary_uplink: null
+    ru: 2
+    power_w: null
+    optic_hint: QSFP-DD
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: "ACI support not stated in source; verify against data sheet at GA."
+    asic: null
+    availability: future
+    available_from: "2027-H1"
+    notes: "Not orderable until 1H CY27."
+    data_sheet_url: null
+    attachments: []
+
+  # ──────────────────────────────────────────────────────────────────
+  # 10G / 25G / 50G ToR leaves (with 100G or 400G uplinks)
+  # ──────────────────────────────────────────────────────────────────
+  - id: N9396Y12C-SE1
+    model_display: Nexus 9396Y12C-SE1
+    vendor: Cisco
+    role: leaf
+    category: "25G-ToR"
+    primary:
+      ports: 96
+      speed_g: 25
+      speed_options_g: [10, 25]
+      naming_template: "Eth1/{1..96}"
+    uplink:
+      ports: 12
+      speed_g: 100
+      speed_options_g: [100]
+      naming_template: "Eth1/{97..108}"
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: SFP28 (primary) / QSFP28 (uplink)
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: "E100 (SE1)"
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9396T12C-SE1
+    model_display: Nexus 9396T12C-SE1
+    vendor: Cisco
+    role: leaf
+    category: "10G-ToR"
+    primary:
+      ports: 96
+      speed_g: 10
+      speed_options_g: [1, 10]
+      naming_template: "Eth1/{1..96}"
+    uplink:
+      ports: 12
+      speed_g: 100
+      speed_options_g: [100]
+      naming_template: "Eth1/{97..108}"
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: 10GBASE-T (primary) / QSFP28 (uplink)
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: "E100 (SE1)"
+    availability: available
+    available_from: null
+    notes: "Copper 10GBASE-T host ports."
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9K-C93400LD-H1
+    model_display: Nexus 93400LD-H1
+    vendor: Cisco
+    role: leaf
+    category: "25G-ToR"
+    primary:
+      ports: 48
+      speed_g: 50
+      speed_options_g: [10, 25, 50]
+      naming_template: "Eth1/{1..48}"
+    uplink:
+      ports: 4
+      speed_g: 400
+      speed_options_g: [400]
+      naming_template: "Eth1/{49..52}"
+    secondary_uplink: null
+    ru: null
+    power_w: null
+    optic_hint: SFP56 (primary) / QSFP-DD (uplink)
+    capabilities:
+      aci_leaf: true
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: "QDD-400G-BD ACI support planned for late Q4 CY2026."
+    asic: null
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9348Y2C6D-SE1U
+    model_display: Nexus 9348Y2C6D-SE1U
+    vendor: Cisco
+    role: leaf
+    category: "25G-ToR"
+    primary:
+      ports: 48
+      speed_g: 25
+      speed_options_g: [10, 25]
+      naming_template: "Eth1/{1..48}"
+    uplink:
+      ports: 6
+      speed_g: 400
+      speed_options_g: [400]
+      naming_template: "Eth1/{49..54}"
+    secondary_uplink:
+      ports: 2
+      speed_g: 100
+      speed_options_g: [100]
+      naming_template: "Eth1/{55..56}"
+    ru: null
+    power_w: null
+    optic_hint: SFP28 (primary) / QSFP-DD (uplink) / QSFP28 (secondary uplink)
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: true
+      ult_low_latency: false
+      poe: false
+      macsec: true
+      hpc: false
+      ai_ml: false
+      dpu_integrated: true
+    aci_note: "ACI support is for Zone-Based Firewall or DCI only, not ACI Leaf."
+    asic: "E100 (SE1U)"
+    availability: available
+    available_from: null
+    notes: "Integrated 800G DPU firewall."
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9K-C93180YC-FX3
+    model_display: Nexus 93180YC-FX3
+    vendor: Cisco
+    role: leaf
+    category: "25G-ToR"
+    primary:
+      ports: 48
+      speed_g: 25
+      speed_options_g: [10, 25]
+      naming_template: "Eth1/{1..48}"
+    uplink:
+      ports: 6
+      speed_g: 100
+      speed_options_g: [40, 100]
+      naming_template: "Eth1/{49..54}"
+    secondary_uplink: null
+    ru: 1
+    power_w: null
+    optic_hint: SFP28 (primary) / QSFP28 (uplink)
+    capabilities:
+      aci_leaf: true
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9K-C93108TC-FX3
+    model_display: Nexus 93108TC-FX3
+    vendor: Cisco
+    role: leaf
+    category: "10G-ToR"
+    primary:
+      ports: 48
+      speed_g: 10
+      speed_options_g: [0.1, 1, 10]
+      naming_template: "Eth1/{1..48}"
+    uplink:
+      ports: 6
+      speed_g: 100
+      speed_options_g: [40, 100]
+      naming_template: "Eth1/{49..54}"
+    secondary_uplink: null
+    ru: 1
+    power_w: null
+    optic_hint: 10GBASE-T (primary) / QSFP28 (uplink)
+    capabilities:
+      aci_leaf: true
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: "Copper host ports: 100M / 1G / 10G."
+    data_sheet_url: null
+    attachments: []
+
+  - id: 9348GC-FX3
+    model_display: Nexus 9348GC-FX3
+    vendor: Cisco
+    role: leaf
+    category: "1G-Access"
+    primary:
+      ports: 48
+      speed_g: 1
+      speed_options_g: [0.01, 0.1, 1]
+      naming_template: "Eth1/{1..48}"
+    uplink:
+      ports: 2
+      speed_g: 100
+      speed_options_g: [40, 100]
+      naming_template: "Eth1/{53..54}"
+    secondary_uplink:
+      ports: 4
+      speed_g: 25
+      speed_options_g: [1, 10, 25]
+      naming_template: "Eth1/{49..52}"
+    ru: 1
+    power_w: null
+    optic_hint: 1000BASE-T (primary) / SFP28 (secondary uplink) / QSFP28 (uplink)
+    capabilities:
+      aci_leaf: true
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: "To be replaced by 9248G4Y-SA1 in the near future."
+    data_sheet_url: null
+    attachments: []
+
+  # ──────────────────────────────────────────────────────────────────
+  # 100G-only leaves
+  # ──────────────────────────────────────────────────────────────────
+  - id: N9K-C9336C-FX2
+    model_display: Nexus 9336C-FX2
+    vendor: Cisco
+    role: leaf
+    category: "100G"
+    primary:
+      ports: 36
+      speed_g: 100
+      speed_options_g: [40, 100]
+      naming_template: "Eth1/{1..36}"
+    uplink: null
+    secondary_uplink: null
+    ru: 1
+    power_w: null
+    optic_hint: QSFP28
+    capabilities:
+      aci_leaf: true
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: null
+    data_sheet_url: null
+    attachments: []
+
+  # ──────────────────────────────────────────────────────────────────
+  # Other / specialty Nexus switches
+  # ──────────────────────────────────────────────────────────────────
+  - id: N3K-C3548P-XL
+    model_display: Nexus 3548P-XL
+    vendor: Cisco
+    role: leaf
+    category: "Ultra-Low-Latency"
+    primary:
+      ports: 48
+      speed_g: 10
+      speed_options_g: [1, 10]
+      naming_template: "Eth1/{1..48}"
+    uplink: null
+    secondary_uplink: null
+    ru: 1
+    power_w: null
+    optic_hint: SFP+
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: true
+      poe: false
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: "480 Gbps total capacity; ~240 ns port-to-port latency."
+    data_sheet_url: null
+    attachments: []
+
+  - id: 93108TC-FX3P
+    model_display: Nexus 93108TC-FX3P
+    vendor: Cisco
+    role: leaf
+    category: "1G-PoE"
+    primary:
+      ports: 48
+      speed_g: 10
+      speed_options_g: [0.1, 1, 2.5, 5, 10]
+      naming_template: "Eth1/{1..48}"
+    uplink:
+      ports: 6
+      speed_g: 100
+      speed_options_g: [40, 100]
+      naming_template: "Eth1/{49..54}"
+    secondary_uplink: null
+    ru: 1
+    power_w: null
+    optic_hint: mGig copper (primary) / QSFP28 (uplink)
+    capabilities:
+      aci_leaf: true
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: true
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: null
+    asic: null
+    availability: available
+    available_from: null
+    notes: "PoE-capable mGig copper host ports (100M/1G/2.5G/5G/10G)."
+    data_sheet_url: null
+    attachments: []
+
+  - id: 9348GC-FX3PH
+    model_display: Nexus 9348GC-FX3PH
+    vendor: Cisco
+    role: leaf
+    category: "1G-PoE"
+    primary:
+      ports: 40
+      speed_g: 1
+      speed_options_g: [0.01, 0.1, 1]
+      naming_template: "Eth1/{1..40}"
+    uplink: null
+    secondary_uplink: null
+    ru: 1
+    power_w: null
+    optic_hint: 1000BASE-T
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: false
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: true
+      macsec: false
+      hpc: false
+      ai_ml: false
+      dpu_integrated: false
+    aci_note: "Despite FX3 branding, this model is NOT ACI capable."
+    asic: null
+    availability: available
+    available_from: null
+    notes: "Also has 8x half-duplex 10/100M ports for legacy device support."
+    data_sheet_url: null
+    attachments: []
+
+  # ──────────────────────────────────────────────────────────────────
+  # 800G spines — NX-OS / SONiC / Hyperfabric only (no ACI)
+  # ──────────────────────────────────────────────────────────────────
+  - id: N9364E-SG2-O
+    model_display: Nexus 9364E-SG2-O
+    vendor: Cisco
+    role: spine
+    category: "800G"
+    primary:
+      ports: 64
+      speed_g: 800
+      speed_options_g: [800]
+      naming_template: "Eth1/{1..64}"
+    uplink: null
+    secondary_uplink: null
+    ru: 2
+    power_w: null
+    optic_hint: OSFP
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: true
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: true
+      ai_ml: true
+      dpu_integrated: false
+    aci_note: "Does not support ACI."
+    asic: "SG2 (Silicon One G200)"
+    availability: available
+    available_from: null
+    notes: "Spectrum-X capable; 256 MB fully-shared packet buffer."
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9364E-SG2-Q
+    model_display: Nexus 9364E-SG2-Q
+    vendor: Cisco
+    role: spine
+    category: "800G"
+    primary:
+      ports: 64
+      speed_g: 800
+      speed_options_g: [800]
+      naming_template: "Eth1/{1..64}"
+    uplink: null
+    secondary_uplink: null
+    ru: 2
+    power_w: null
+    optic_hint: QSFP-DD
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: true
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: true
+      ai_ml: true
+      dpu_integrated: false
+    aci_note: "Does not support ACI."
+    asic: "SG2 (Silicon One G200)"
+    availability: available
+    available_from: null
+    notes: "Spectrum-X capable; 256 MB fully-shared packet buffer."
+    data_sheet_url: null
+    attachments: []
+
+  - id: N9164E-NS4-O
+    model_display: Nexus 9164E-NS4-O
+    vendor: Cisco
+    role: spine
+    category: "800G"
+    primary:
+      ports: 64
+      speed_g: 800
+      speed_options_g: [800]
+      naming_template: "Eth1/{1..64}"
+    uplink: null
+    secondary_uplink: null
+    ru: 2
+    power_w: null
+    optic_hint: OSFP
+    capabilities:
+      aci_leaf: false
+      aci_spine: false
+      nxos: true
+      rocev2: true
+      deep_buffer: false
+      smart_switch: false
+      ult_low_latency: false
+      poe: false
+      macsec: false
+      hpc: true
+      ai_ml: true
+      dpu_integrated: false
+    aci_note: "Does not support ACI."
+    asic: "Nvidia Spectrum-4"
+    availability: available
+    available_from: null
+    notes: "Supports NX-OS, SONiC, or Cisco Hyperfabric operating systems."
+    data_sheet_url: null
+    attachments: []

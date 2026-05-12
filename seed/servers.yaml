@@ -1,0 +1,123 @@
+# DCN Designer — servers library seed
+#
+# Small starter set of Cisco UCS rackmount servers. Specs (port counts,
+# NIC speeds, GPU details, power) are best-effort and should be confirmed
+# / adjusted via the Library UI against current Cisco data sheets.
+
+schema_version: 1
+servers:
+  - id: UCS-C220-M7
+    model_display: UCS C220 M7 Rack Server
+    vendor: Cisco
+    role: server
+    category: "Compute"
+    ru: 1
+    power_w: null
+    ports:
+      - count: 2
+        speed_g: 25
+        naming_template: "MLOM/{1..2}"
+    gpu: null
+    notes: "Intel Xeon 4th/5th gen; 1RU general-purpose rackmount."
+    data_sheet_url: null
+    attachments: []
+
+  - id: UCS-C220-M8
+    model_display: UCS C220 M8 Rack Server
+    vendor: Cisco
+    role: server
+    category: "Compute"
+    ru: 1
+    power_w: null
+    ports:
+      - count: 2
+        speed_g: 100
+        naming_template: "MLOM/{1..2}"
+    gpu: null
+    notes: "Intel Xeon 6; 1RU general-purpose rackmount; successor to C220 M7."
+    data_sheet_url: null
+    attachments: []
+
+  - id: UCS-C240-M7
+    model_display: UCS C240 M7 Rack Server
+    vendor: Cisco
+    role: server
+    category: "Compute"
+    ru: 2
+    power_w: null
+    ports:
+      - count: 2
+        speed_g: 25
+        naming_template: "MLOM/{1..2}"
+    gpu: null
+    notes: "Intel Xeon 4th/5th gen; 2RU general-purpose with PCIe expansion."
+    data_sheet_url: null
+    attachments: []
+
+  - id: UCS-C240-M8
+    model_display: UCS C240 M8 Rack Server
+    vendor: Cisco
+    role: server
+    category: "Compute"
+    ru: 2
+    power_w: null
+    ports:
+      - count: 2
+        speed_g: 100
+        naming_template: "MLOM/{1..2}"
+    gpu: null
+    notes: "Intel Xeon 6; 2RU general-purpose with PCIe expansion; successor to C240 M7."
+    data_sheet_url: null
+    attachments: []
+
+  - id: UCS-C245-M8
+    model_display: UCS C245 M8 Rack Server
+    vendor: Cisco
+    role: server
+    category: "Compute"
+    ru: 2
+    power_w: null
+    ports:
+      - count: 2
+        speed_g: 100
+        naming_template: "MLOM/{1..2}"
+    gpu: null
+    notes: "AMD EPYC; 2RU general-purpose with PCIe expansion."
+    data_sheet_url: null
+    attachments: []
+
+  - id: UCS-C845A-M8
+    model_display: UCS C845A M8 GPU Server
+    vendor: Cisco
+    role: server
+    category: "GPU"
+    ru: 2
+    power_w: null
+    ports:
+      - count: 4
+        speed_g: 100
+        naming_template: "NIC/{1..4}"
+    gpu:
+      model: Nvidia L40S
+      count: 4
+    notes: "2RU mid-range AI / GPU rackmount; orderable with up to 8 GPUs."
+    data_sheet_url: null
+    attachments: []
+
+  - id: UCS-C885A-M8
+    model_display: UCS C885A M8 AI Server
+    vendor: Cisco
+    role: server
+    category: "AI/HPC"
+    ru: 8
+    power_w: null
+    ports:
+      - count: 8
+        speed_g: 400
+        naming_template: "NIC/{1..8}"
+    gpu:
+      model: Nvidia H200
+      count: 8
+    notes: "8RU high-end AI / HPC rackmount with NVLink GPU fabric; primary use case is scale-out AI training."
+    data_sheet_url: null
+    attachments: []
