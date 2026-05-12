@@ -1,7 +1,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SwitchesPanel } from './SwitchesPanel'
 import { ServersPanel } from './ServersPanel'
-import { OpticsPanelStub } from './OpticsPanelStub'
+import { OpticsPanel } from './OpticsPanel'
 
 export function LibraryView() {
   return (
@@ -10,8 +10,7 @@ export function LibraryView() {
         <header>
           <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Switches, servers, and (in phase 1b) per-switch optics. Edits write back to YAML in
-            your workspace.
+            Switches, servers, and per-switch optics. Edits write back to YAML in your workspace.
           </p>
         </header>
         <Tabs defaultValue="switches">
@@ -27,7 +26,7 @@ export function LibraryView() {
             <ServersPanel />
           </TabsContent>
           <TabsContent value="optics" className="mt-4">
-            <OpticsPanelStub />
+            <OpticsPanel />
           </TabsContent>
         </Tabs>
       </div>

@@ -5,6 +5,13 @@ export interface DcnProjectListEntry {
   last_edited: string
 }
 
+export interface DcnOpticsIndexEntry {
+  switch_id: string
+  source_csv: string | null
+  imported_at: string | null
+  optic_count: number
+}
+
 export interface DcnApi {
   defaultWorkspacePath(): Promise<string>
   showWorkspacePicker(defaultPath: string): Promise<string | null>
@@ -16,4 +23,8 @@ export interface DcnApi {
   createProject(workspacePath: string, name: string, customer: string): Promise<string>
   showImportPicker(): Promise<string | null>
   importProject(workspacePath: string, sourcePath: string, copy: boolean): Promise<string>
+  showCsvPicker(title: string): Promise<{ path: string; basename: string } | null>
+  readTextFile(filePath: string): Promise<string>
+  listOptics(workspacePath: string): Promise<DcnOpticsIndexEntry[]>
+  deleteOptics(workspacePath: string, switchId: string): Promise<void>
 }

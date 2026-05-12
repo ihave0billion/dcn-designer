@@ -139,6 +139,63 @@ function registerIpc(): void {
     await fs.cp(sourcePath, dst, { recursive: true })
     return dst
   })
+
+  ipcMain.handle('dcn:show-csv-picker', async (_e, title: string) => {
+    const result = await dialog.showOpenDialog({
+      title: title || 'Choose CSV file',
+      properties: ['openFile'],
+      filters: [
+        { name: 'CSV / TSV', extensions: ['csv', 'tsv', 'txt'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const filePath = result.filePaths[0]
+    return { path: filePath, basename: filePath.split('/').pop() ?? filePath }
+  })
+
+  ipcMain.handle('dcn:read-text-file', async (_e, filePath: string) => {
+    return fs.readFile(filePath, 'utf8')
+  })
+
+  ipcMain.handle('dcn:list-optics', async (_e, workspacePath: string) => {
+    const opticsDir = join(workspacePath, 'library', 'optics')
+    if (!existsSync(opticsDir)) return []
+    const entries = await fs.readdir(opticsDir, { withFileTypes: true })
+    const out: Array<{ switch_id: string; source_csv: string | null; imported_at: string | null; optic_count: number }> = []
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.yaml')) continue
+      const filePath = join(opticsDir, entry.name)
+      try {
+        const raw = await fs.readFile(filePath, 'utf8')
+        const data = parseYaml(raw) as {
+          switch_id?: string
+          source_csv?: string | null
+          imported_at?: string | null
+          optics?: unknown[]
+        }
+        const switchId = data?.switch_id ?? entry.name.replace(/\.yaml$/, '')
+        out.push({
+          switch_id: switchId,
+          source_csv: data?.source_csv ?? null,
+          imported_at: data?.imported_at ?? null,
+          optic_count: Array.isArray(data?.optics) ? data.optics.length : 0
+        })
+      } catch {
+        // skip unreadable optics files
+      }
+    }
+    out.sort((a, b) => a.switch_id.localeCompare(b.switch_id))
+    return out
+  })
+
+  ipcMain.handle('dcn:delete-optics', async (_e, workspacePath: string, switchId: string) => {
+    const safe = switchId.replace(/[/\\]/g, '_')
+    const filePath = join(workspacePath, 'library', 'optics', `${safe}.yaml`)
+    if (existsSync(filePath)) {
+      await fs.unlink(filePath)
+    }
+  })
 }
 
 function createWindow(): void {

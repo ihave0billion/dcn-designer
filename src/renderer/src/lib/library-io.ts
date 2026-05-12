@@ -1,5 +1,6 @@
 import { SwitchesFileSchema, type SwitchesFile, type Switch } from '@/schemas/switches'
 import { ServersFileSchema, type ServersFile, type Server } from '@/schemas/servers'
+import { OpticsFileSchema, type OpticsFile, type Optic } from '@/schemas/optics'
 
 export function librarySwitchesPath(workspacePath: string): string {
   return `${workspacePath}/library/switches.yaml`
@@ -43,4 +44,39 @@ export async function saveServers(workspacePath: string, servers: Server[]): Pro
     throw new Error(`servers.yaml schema validation failed before save: ${parsed.error.message}`)
   }
   await window.dcn.writeYaml(libraryServersPath(workspacePath), parsed.data)
+}
+
+export function libraryOpticsPath(workspacePath: string, switchId: string): string {
+  const safe = switchId.replace(/[/\\]/g, '_')
+  return `${workspacePath}/library/optics/${safe}.yaml`
+}
+
+export async function loadOpticsFile(workspacePath: string, switchId: string): Promise<OpticsFile> {
+  const raw = await window.dcn.readYaml(libraryOpticsPath(workspacePath, switchId))
+  const parsed = OpticsFileSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`optics/${switchId}.yaml schema validation failed: ${parsed.error.message}`)
+  }
+  return parsed.data
+}
+
+export async function saveOpticsFile(
+  workspacePath: string,
+  switchId: string,
+  optics: Optic[],
+  sourceCsv: string | null,
+  importedAt: string | null
+): Promise<void> {
+  const file: OpticsFile = {
+    schema_version: 1,
+    switch_id: switchId,
+    source_csv: sourceCsv,
+    imported_at: importedAt,
+    optics
+  }
+  const parsed = OpticsFileSchema.safeParse(file)
+  if (!parsed.success) {
+    throw new Error(`optics/${switchId}.yaml schema validation failed before save: ${parsed.error.message}`)
+  }
+  await window.dcn.writeYaml(libraryOpticsPath(workspacePath, switchId), parsed.data)
 }

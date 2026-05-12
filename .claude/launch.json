@@ -4,7 +4,7 @@
     {
       "name": "renderer-only",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--config", "electron.vite.config.ts", "--mode", "development", "src/renderer"],
+      "runtimeArgs": ["vite", "--mode", "development", "src/renderer"],
       "port": 5173
     }
   ]

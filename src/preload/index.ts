@@ -14,7 +14,12 @@ const dcn: DcnApi = {
     ipcRenderer.invoke('dcn:create-project', workspacePath, name, customer),
   showImportPicker: () => ipcRenderer.invoke('dcn:show-import-picker'),
   importProject: (workspacePath, sourcePath, copy) =>
-    ipcRenderer.invoke('dcn:import-project', workspacePath, sourcePath, copy)
+    ipcRenderer.invoke('dcn:import-project', workspacePath, sourcePath, copy),
+  showCsvPicker: (title) => ipcRenderer.invoke('dcn:show-csv-picker', title),
+  readTextFile: (filePath) => ipcRenderer.invoke('dcn:read-text-file', filePath),
+  listOptics: (workspacePath) => ipcRenderer.invoke('dcn:list-optics', workspacePath),
+  deleteOptics: (workspacePath, switchId) =>
+    ipcRenderer.invoke('dcn:delete-optics', workspacePath, switchId)
 }
 
 if (process.contextIsolated) {

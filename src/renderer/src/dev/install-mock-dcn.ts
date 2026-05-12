@@ -3,9 +3,18 @@
 // is excluded by `if (import.meta.env.DEV)` in main.tsx — Vite drops the import
 // entirely during the production build.
 
-import type { DcnApi, DcnProjectListEntry } from '../../../preload/types'
+import type { DcnApi, DcnOpticsIndexEntry, DcnProjectListEntry } from '../../../preload/types'
 
 type AnyRecord = Record<string, unknown>
+
+const MOCK_OPTICS_CSV = `Network Device Product Family,Network Device Product ID,Network Device Breakout mode,Transceiver Business Unit,Transceiver Product Family,Transceiver Product ID,Transceiver Version ID,Transceiver End of Sale,OS Type,Min Software Release,DOM OS Type,DOM Support,Network Device Notes,Data Rate,Form Factor,Reach,Cable Type,Media,Connector Type,Transceiver Type,Case Temperature,DOM Capable,Standard,Transceiver Notes,Network Device Product ID Data Sheet (link),Transceiver Product ID Data Sheet (link)
+N9300,N9K-C9364D-GX2A, ,TMG,QSFP100,QSFP-100G-SR4-S, , ,ACI,ACI-N9KDK9-15.2(5),ACI,ACI-N9KDK9-15.2(5), ,100 Gbps,QSFP28,100m,Parallel Fiber,MMF,MPO-12 (UPC),Optic,0 to 70C,Y,IEEE 100GBASE-SR4,OM3: 70m; OM4/OM5: 100m. ,https://example.com/switch.html,https://example.com/optic.html,
+N9300,N9K-C9364D-GX2A, ,TMG,QSFP100,QSFP-100G-SR4-S, , ,NX-OS,NX-OS 10.2(3) F,NX-OS,NX-OS 10.2(3) F, ,100 Gbps,QSFP28,100m,Parallel Fiber,MMF,MPO-12 (UPC),Optic,0 to 70C,Y,IEEE 100GBASE-SR4,OM3: 70m; OM4/OM5: 100m. ,https://example.com/switch.html,https://example.com/optic.html,
+N9300,N9K-C9364D-GX2A, ,TMG,QSFP100,QSFP-100G-LR4-S, , ,ACI,ACI-N9KDK9-15.2(5),ACI,ACI-N9KDK9-15.2(5), ,100 Gbps,QSFP28,10km,Duplex Fiber,SMF,LC (UPC),Optic,0 to 70C,Y,IEEE 100GBASE-LR4, ,https://example.com/switch.html,https://example.com/optic.html,
+N9300,N9K-C9364D-GX2A, ,TMG,QSFP100,QSFP-100G-LR4-S, , ,NX-OS,NX-OS 10.2(3) F,NX-OS,NX-OS 10.2(3) F, ,100 Gbps,QSFP28,10km,Duplex Fiber,SMF,LC (UPC),Optic,0 to 70C,Y,IEEE 100GBASE-LR4, ,https://example.com/switch.html,https://example.com/optic.html,
+N9300,N9K-C9364D-GX2A, ,TMG,QDD400G,QDD-400G-SR4.2, ,Y,NX-OS,NX-OS 10.4(2)F,NX-OS,NX-OS 10.4(2)F, ,400 Gbps,QSFP-DD,100m,Parallel Fiber,MMF,MPO-12 (APC),Optic,0 to 70C,Y,IEEE 400GBASE-SR4.2,OM4: 100m. ,https://example.com/switch.html,https://example.com/optic.html,
+N9300,N9K-C9332D-H2R, ,TMG,QDD400G,QDD-400G-LR4-S, , ,NX-OS,NX-OS 10.2(3) F,NX-OS,NX-OS 10.2(3) F, ,400 Gbps,QSFP-DD,10km,Duplex Fiber,SMF,LC (UPC),Optic,0 to 70C,Y,IEEE 400GBASE-LR4, ,https://example.com/switch.html,https://example.com/optic.html,
+`
 
 export function installMockDcn(): void {
   if (typeof window === 'undefined') return
@@ -122,6 +131,13 @@ export function installMockDcn(): void {
 
   const projects: DcnProjectListEntry[] = []
 
+  // Per-switch optics: map of `library/optics/<id>.yaml` → file content (mutable)
+  const opticsFiles = new Map<string, AnyRecord>()
+
+  function opticsPathFor(switchId: string): string {
+    return `/mock-workspace/library/optics/${switchId}.yaml`
+  }
+
   const mock: DcnApi = {
     defaultWorkspacePath: async () => '/Users/hectgarc/DCN-Designer-Mock',
     showWorkspacePicker: async (def) => def || '/Users/hectgarc/DCN-Designer-Mock',
@@ -133,16 +149,23 @@ export function installMockDcn(): void {
         const now = new Date().toISOString()
         return { schema_version: 1, project: { name: 'mock-proj', customer: 'Mock Co.', site: '', created: now, last_edited: now } } as T
       }
+      if (filePath.includes('/library/optics/')) {
+        const cached = opticsFiles.get(filePath)
+        if (cached) return structuredClone(cached) as T
+        throw new Error(`[mock] no optics file at ${filePath}`)
+      }
       throw new Error(`[mock] readYaml not handled: ${filePath}`)
     },
     writeYaml: async (filePath, data) => {
-      const d = data as { switches?: AnyRecord[]; servers?: AnyRecord[] }
+      const d = data as { switches?: AnyRecord[]; servers?: AnyRecord[]; switch_id?: string; optics?: AnyRecord[] }
       if (filePath.endsWith('switches.yaml') && d.switches) {
         switches.length = 0
         switches.push(...d.switches)
       } else if (filePath.endsWith('servers.yaml') && d.servers) {
         servers.length = 0
         servers.push(...d.servers)
+      } else if (filePath.includes('/library/optics/')) {
+        opticsFiles.set(filePath, structuredClone(data as AnyRecord))
       }
     },
     fileExists: async () => true,
@@ -153,7 +176,29 @@ export function installMockDcn(): void {
       return path
     },
     showImportPicker: async () => null,
-    importProject: async () => '/mock-imported'
+    importProject: async () => '/mock-imported',
+    showCsvPicker: async () => ({ path: '/mock/N9K-C9364D-GX2A-OPTICS.csv', basename: 'N9K-C9364D-GX2A-OPTICS.csv' }),
+    readTextFile: async (filePath) => {
+      if (filePath.endsWith('.csv')) return MOCK_OPTICS_CSV
+      throw new Error(`[mock] readTextFile not handled: ${filePath}`)
+    },
+    listOptics: async () => {
+      const out: DcnOpticsIndexEntry[] = []
+      for (const [path, content] of opticsFiles) {
+        const c = content as { switch_id?: string; source_csv?: string | null; imported_at?: string | null; optics?: unknown[] }
+        out.push({
+          switch_id: c.switch_id ?? path.split('/').pop()!.replace(/\.yaml$/, ''),
+          source_csv: c.source_csv ?? null,
+          imported_at: c.imported_at ?? null,
+          optic_count: Array.isArray(c.optics) ? c.optics.length : 0
+        })
+      }
+      out.sort((a, b) => a.switch_id.localeCompare(b.switch_id))
+      return out
+    },
+    deleteOptics: async (_w, switchId) => {
+      opticsFiles.delete(opticsPathFor(switchId))
+    }
   }
 
   Object.defineProperty(window, 'dcn', { value: mock, writable: false, configurable: false })

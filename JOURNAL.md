@@ -24,6 +24,19 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-05-12 — Curated `seed/breakout_pairs.yaml` for verified optic pairs
+- **Context:** TMG per-switch optics CSV does not include breakout scenarios. Solver and Cable
+  Links UI need a way to know which spine optic can break out into N× leaf optics. Decision:
+  use a small hand-curated file rather than PID heuristics, mirroring v8 rule 11
+  ("verify against current Cisco data sheet" except for verified pairs).
+- **Initial entries to seed:** `QDD-400G-BD ↔ QSFP-100G-SR1.2` (verified 1:1, from v8 rule 11);
+  `QDD-400G-SR4.2 → 4× QSFP-100G-SR1.2` (verified breakout, user-provided example).
+- **Schema (proposed):** `{ schema_version, pairs: [{ spine_pid, leaf_pid, fanout: 1|2|4|8,
+  verified_by, notes }] }`.
+- **Why open:** belongs to whichever phase needs it first — solver "breakout pass" in Phase 2,
+  or Cable Links UI in Phase 6.
+- **Revisit:** Phase 2 (solver) at the start of work.
+
 ### 2026-05-12 — When does the "any updates to switches?" prompt fire?
 - **Context:** User asked the app to prompt for switch library updates "near the beginning of the
   user's workflow." Default-parked at: banner on project-open with skip / "review library"
@@ -56,6 +69,22 @@ earlier interim commit was dropped before the recommit.
 ---
 
 ## Errors / failures and resolutions
+
+### 2026-05-12 — `@/*` alias unresolved in renderer-only browser preview
+- **Symptom:** After starting `vite --config electron.vite.config.ts --mode development src/renderer`,
+  the dev server overlay showed `Failed to resolve import "@/components/ui/button" from
+  "src/renderer/src/views/SettingsView.tsx"`.
+- **Root cause:** `electron.vite.config.ts` uses electron-vite's nested format
+  (`{ main: {…}, preload: {…}, renderer: { resolve: { alias: … } } }`). When invoked by plain
+  Vite (instead of electron-vite's CLI), the top-level keys are unrecognized and dropped, so no
+  alias is applied. This had appeared to work in phase 1 only because of a stale `.vite/` cache.
+- **Fix:** Added `src/renderer/vite.config.ts` with a flat Vite config that mirrors the alias
+  (`@`, `@renderer` → `src/renderer/src`), and updated `.claude/launch.json` to drop the
+  `--config electron.vite.config.ts` flag. Production Electron build still uses the root
+  `electron.vite.config.ts`.
+- **Lesson:** Tools that share config files between different invocation paths (electron-vite
+  CLI vs. plain Vite CLI) silently drop unknown keys — don't assume one config covers both.
+  When verifying via browser preview, use a renderer-scoped Vite config.
 
 ### 2026-05-12 — Renderer blank in browser preview after phase 1
 - **Symptom:** `localhost:5173` showed a blank page; React error boundary warnings: "An error
