@@ -24,18 +24,18 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
-### 2026-05-12 — Curated `seed/breakout_pairs.yaml` for verified optic pairs
-- **Context:** TMG per-switch optics CSV does not include breakout scenarios. Solver and Cable
-  Links UI need a way to know which spine optic can break out into N× leaf optics. Decision:
-  use a small hand-curated file rather than PID heuristics, mirroring v8 rule 11
-  ("verify against current Cisco data sheet" except for verified pairs).
-- **Initial entries to seed:** `QDD-400G-BD ↔ QSFP-100G-SR1.2` (verified 1:1, from v8 rule 11);
-  `QDD-400G-SR4.2 → 4× QSFP-100G-SR1.2` (verified breakout, user-provided example).
-- **Schema (proposed):** `{ schema_version, pairs: [{ spine_pid, leaf_pid, fanout: 1|2|4|8,
-  verified_by, notes }] }`.
-- **Why open:** belongs to whichever phase needs it first — solver "breakout pass" in Phase 2,
-  or Cable Links UI in Phase 6.
-- **Revisit:** Phase 2 (solver) at the start of work.
+### 2026-05-12 — Patch-panel dropdown when breakout pairs have connector mismatch
+- **Context:** Phase 2 solver emits `BREAKOUT_PATCH_PANEL_NEEDED` when the verified breakout
+  pair's spine_connector ≠ leaf_connector (e.g. `QDD-400G-SR4.2` MPO-12 ↔ `QSFP-100G-SR1.2`
+  LC). User explicitly asked for a dropdown to pick the patch panel SKU at this point. The
+  warning surfaces in the solver output today; the UI piece is deferred to Cable Links.
+- **What's likely needed:** a `seed/patch_panels.yaml` library file with curated MPO↔LC
+  cassette / breakout-module SKUs, plus a "Patch Panel" dropdown in the Cable Links manager's
+  New Link form whenever the chosen spine + leaf optics imply a connector change. The dropdown
+  should default to a sensible cassette and persist into `cable_links.yaml`.
+- **Why open:** the dropdown UI doesn't exist yet (Cable Links manager arrives in Phase 6).
+- **Revisit:** Phase 6 (Cable Links manager) — design `patch_panels.yaml` and the dropdown
+  together.
 
 ### 2026-05-12 — When does the "any updates to switches?" prompt fire?
 - **Context:** User asked the app to prompt for switch library updates "near the beginning of the
@@ -58,6 +58,15 @@ next time we hit a similar shape of problem.
 ---
 
 ## Resolved (recent)
+
+### 2026-05-12 — `seed/breakout_pairs.yaml` schema + initial entries → resolved
+Shipped in Phase 2. Two entries: `QDD-400G-BD ↔ QSFP-100G-SR1.2` (fanout 1, both LC,
+`requires_patch_panel: false`) and `QDD-400G-SR4.2 → 4× QSFP-100G-SR1.2` (fanout 4, MPO-12 ↔
+LC, `requires_patch_panel: true`). Schema extended beyond JOURNAL's original proposal to
+include `spine_connector`, `leaf_connector`, and `requires_patch_panel` per user request —
+patch-panel dropdown for the UI side moved to its own open item (Phase 6). Solver
+(`src/domain/spine.ts`) reads this file via `SolverContext.breakout_pairs` and surfaces
+`BREAKOUT_PATCH_PANEL_NEEDED` warnings when connectors differ.
 
 ### 2026-05-12 — git init? → resolved
 Repo initialized as DCN Designer **v1** (not v8 — user clarified the legacy spreadsheet is

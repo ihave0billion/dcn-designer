@@ -3,14 +3,16 @@
   "include": [
     "src/renderer/src/**/*",
     "src/preload/index.d.ts",
-    "src/preload/types.ts"
+    "src/preload/types.ts",
+    "src/domain/**/*"
   ],
   "compilerOptions": {
     "composite": true,
     "baseUrl": ".",
     "paths": {
       "@renderer/*": ["src/renderer/src/*"],
-      "@/*": ["src/renderer/src/*"]
+      "@/*": ["src/renderer/src/*"],
+      "@domain/*": ["src/domain/*"]
     }
   }
 }

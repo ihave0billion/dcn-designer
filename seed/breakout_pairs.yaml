@@ -1,0 +1,55 @@
+# DCN Designer — verified spine-optic ↔ leaf-optic pairs
+#
+# Curated list of optic pairs the solver may suggest. The TMG-format CSV
+# imported per switch (library/optics/<id>.yaml) does NOT include
+# breakout scenarios, so breakout viability is decided here and not
+# inferred from PID heuristics.
+#
+# The solver uses this file in two places:
+#   1. Breakout pass — for any link where the spine optic ID matches a
+#      pair entry's spine_pid, the solver permits the fanout and emits
+#      the leaf-side optic suggestion.
+#   2. Validation — when spine_connector and leaf_connector differ
+#      (e.g. MPO-12 ↔ LC), the solver emits a warning that a patch
+#      panel is needed for the link. (UI dropdown for patch panel
+#      selection is deferred to Phase 6 — Cable Links manager.)
+#
+# Source for the two verified entries below: CLAUDE.md hard rule 11
+# ("verified pairs"), plus user-supplied verified breakout example.
+#
+# Schema:
+#   - spine_pid          : optic PID at the spine end of the link
+#   - leaf_pid           : optic PID at each leaf end (1 per fanout)
+#   - fanout             : 1 | 2 | 4 | 8  — how many leaf-side optics
+#                          one spine-side optic feeds
+#   - spine_connector    : connector type at the spine optic
+#   - leaf_connector     : connector type at the leaf optic
+#   - requires_patch_panel: derived (true when connectors differ)
+#   - verified_by        : where the verification comes from
+#   - notes              : free text
+
+schema_version: 1
+
+pairs:
+  - spine_pid: QDD-400G-BD
+    leaf_pid: QSFP-100G-SR1.2
+    fanout: 1
+    spine_connector: LC (UPC)
+    leaf_connector: LC (UPC)
+    requires_patch_panel: false
+    verified_by: CLAUDE.md hard rule 11 — verified 1:1 pair carried over from v8
+    notes: >
+      400G BiDi ↔ 100G SR1.2 single-pair link. Same LC connector both
+      ends, no patch panel needed.
+
+  - spine_pid: QDD-400G-SR4.2
+    leaf_pid: QSFP-100G-SR1.2
+    fanout: 4
+    spine_connector: MPO-12 (UPC)
+    leaf_connector: LC (UPC)
+    requires_patch_panel: true
+    verified_by: user-provided verified breakout pair (2026-05-12)
+    notes: >
+      400G SR4.2 spine optic fans out to 4× 100G SR1.2 leaf optics.
+      Spine end is MPO-12, leaf end is LC — an MPO-to-LC patch panel
+      (a.k.a. cassette / breakout module) is required at one end.
