@@ -134,6 +134,10 @@ export function installMockDcn(): void {
   // Per-switch optics: map of `library/optics/<id>.yaml` → file content (mutable)
   const opticsFiles = new Map<string, AnyRecord>()
 
+  // Per-project requirements.yaml content keyed by absolute file path. Lets
+  // save + reload round-trip in browser preview without a real filesystem.
+  const requirementsFiles = new Map<string, AnyRecord>()
+
   function opticsPathFor(switchId: string): string {
     return `/mock-workspace/library/optics/${switchId}.yaml`
   }
@@ -146,6 +150,8 @@ export function installMockDcn(): void {
       if (filePath.endsWith('switches.yaml')) return { schema_version: 1, switches: structuredClone(switches) } as T
       if (filePath.endsWith('servers.yaml')) return { schema_version: 1, servers: structuredClone(servers) } as T
       if (filePath.endsWith('requirements.yaml')) {
+        const cached = requirementsFiles.get(filePath)
+        if (cached) return structuredClone(cached) as T
         const now = new Date().toISOString()
         return { schema_version: 1, project: { name: 'mock-proj', customer: 'Mock Co.', site: '', created: now, last_edited: now } } as T
       }
@@ -166,13 +172,32 @@ export function installMockDcn(): void {
         servers.push(...d.servers)
       } else if (filePath.includes('/library/optics/')) {
         opticsFiles.set(filePath, structuredClone(data as AnyRecord))
+      } else if (filePath.endsWith('requirements.yaml')) {
+        requirementsFiles.set(filePath, structuredClone(data as AnyRecord))
       }
     },
     fileExists: async () => true,
-    listProjects: async () => structuredClone(projects),
+    listProjects: async () =>
+      projects.map((p) => {
+        const reqPath = `${p.path}/requirements.yaml`
+        const req = requirementsFiles.get(reqPath) as
+          | { project?: { last_edited?: string; customer?: string; name?: string } }
+          | undefined
+        return {
+          ...p,
+          name: req?.project?.name ?? p.name,
+          customer: req?.project?.customer ?? p.customer,
+          last_edited: req?.project?.last_edited ?? p.last_edited
+        }
+      }),
     createProject: async (workspacePath, name, customer) => {
       const path = `${workspacePath}/projects/${name}`
-      projects.push({ name, path, customer, last_edited: new Date().toISOString() })
+      const now = new Date().toISOString()
+      projects.push({ name, path, customer, last_edited: now })
+      requirementsFiles.set(`${path}/requirements.yaml`, {
+        schema_version: 1,
+        project: { name, customer: customer ?? '', site: '', created: now, last_edited: now }
+      })
       return path
     },
     showImportPicker: async () => null,

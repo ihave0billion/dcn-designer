@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Sidebar, type SidebarRoute } from './components/Sidebar'
 import { ThemeToggle } from './components/ThemeToggle'
 import { useWorkspace } from './state/WorkspaceContext'
@@ -11,6 +11,15 @@ import { SettingsView } from './views/SettingsView'
 export function App() {
   const { ready, workspacePath, currentProjectPath } = useWorkspace()
   const [route, setRoute] = useState<SidebarRoute>('home')
+
+  useEffect(() => {
+    function onNav(e: Event) {
+      const detail = (e as CustomEvent<{ route?: SidebarRoute }>).detail
+      if (detail?.route) setRoute(detail.route)
+    }
+    window.addEventListener('dcn-designer:nav', onNav)
+    return () => window.removeEventListener('dcn-designer:nav', onNav)
+  }, [])
 
   if (!ready) {
     return (

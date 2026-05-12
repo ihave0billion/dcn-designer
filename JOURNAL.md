@@ -24,6 +24,15 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-05-12 — Per-leaf input-mode editor UX
+- **Context:** Phase 3 captured `input_mode` (aggregate vs per_leaf) in `requirements.yaml`
+  but only wired the aggregate path in the form. Per-leaf overrides need a UI that scales
+  to 64-port leaves without one-cell-per-port tedium (Open Risk #4).
+- **What's likely needed:** in the Design screen, when `input_mode == per_leaf`, expose a
+  bulk-assign mode like "set ports 1–48 to 25G, 49–64 to 100G" plus a per-port table for
+  exceptions. Save into `per_leaf_overrides` on `requirements.yaml`.
+- **Revisit:** Phase 4 (Design screen).
+
 ### 2026-05-12 — Patch-panel dropdown when breakout pairs have connector mismatch
 - **Context:** Phase 2 solver emits `BREAKOUT_PATCH_PANEL_NEEDED` when the verified breakout
   pair's spine_connector ≠ leaf_connector (e.g. `QDD-400G-SR4.2` MPO-12 ↔ `QSFP-100G-SR1.2`
@@ -36,13 +45,6 @@ next time we hit a similar shape of problem.
 - **Why open:** the dropdown UI doesn't exist yet (Cable Links manager arrives in Phase 6).
 - **Revisit:** Phase 6 (Cable Links manager) — design `patch_panels.yaml` and the dropdown
   together.
-
-### 2026-05-12 — When does the "any updates to switches?" prompt fire?
-- **Context:** User asked the app to prompt for switch library updates "near the beginning of the
-  user's workflow." Default-parked at: banner on project-open with skip / "review library"
-  buttons.
-- **Why open:** UI location isn't built yet; touches Requirements screen flow.
-- **Revisit:** Phase 3 (Requirements screen).
 
 ### 2026-05-11 — Electron Forge vs electron-builder for packaging
 - **Context:** PROJECT_PLAN.md tech-stack table specifies Electron Forge. Phase 0 used
@@ -58,6 +60,14 @@ next time we hit a similar shape of problem.
 ---
 
 ## Resolved (recent)
+
+### 2026-05-12 — "Any updates to switches?" prompt location → resolved
+Banner lives at the top of the Requirements screen as a yellow-tinted Card with
+**Review library** (dispatches `dcn-designer:nav` CustomEvent that App.tsx routes to the
+Library sidebar entry) and **Skip** buttons. Dismissal persists in localStorage under
+`dcn-designer.review_library_dismissed.<project-path>` so it's per-project — a new
+project will see the prompt again. Implemented in Phase 3
+(`src/renderer/src/views/project/RequirementsView.tsx`).
 
 ### 2026-05-12 — `seed/breakout_pairs.yaml` schema + initial entries → resolved
 Shipped in Phase 2. Two entries: `QDD-400G-BD ↔ QSFP-100G-SR1.2` (fanout 1, both LC,
