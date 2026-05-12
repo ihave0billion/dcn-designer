@@ -37,15 +37,6 @@ next time we hit a similar shape of problem.
 - **Why open:** Re-evaluating now would be premature; both can ship the same app.
 - **Revisit:** Phase 10 (Polish + packaging) — confirm choice and migrate if needed.
 
-### 2026-05-11 — git init?
-- **Context:** Repo is not yet a git repository. CLAUDE.md notes: "Before any non-trivial change,
-  ask whether to `git init` and tag the existing v8 as a baseline." Phases 0 and 1 added ~50
-  source files and `node_modules/`.
-- **Why open:** Asked once in phase 0; user did not respond — proceeded without git. Worth
-  re-asking before phase 2.
-- **Revisit:** Top of next session — propose `git init` and `git tag v8-baseline` on the v8 xlsx
-  + scripts state before adding solver code.
-
 ### 2026-05-11 — npm audit reports 12 vulnerabilities (10 high)
 - **Context:** All in transitive build-chain dependencies (electron-builder / electron-vite
   pulls). Not affecting runtime.
@@ -55,7 +46,12 @@ next time we hit a similar shape of problem.
 
 ## Resolved (recent)
 
-_None yet._
+### 2026-05-12 — git init? → resolved
+Repo initialized as DCN Designer **v1** (not v8 — user clarified the legacy spreadsheet is
+not part of this repo's history). Initial commit `b1b6d44` on `main`. Remote:
+[github.com/ihave0billion/dcn-designer](https://github.com/ihave0billion/dcn-designer) (private).
+Legacy `*.xlsx` and `Deliverables/` excluded via `.gitignore`; `v8-baseline` tag from an
+earlier interim commit was dropped before the recommit.
 
 ---
 
