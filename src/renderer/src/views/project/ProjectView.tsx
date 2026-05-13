@@ -5,12 +5,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useWorkspace } from '@/state/WorkspaceContext'
 import { RequirementsFileSchema, type RequirementsFile, emptyRequirements } from '@/schemas/project'
 import { RequirementsView } from './RequirementsView'
+import { DesignView } from './DesignView'
 
 export function ProjectView() {
   const { currentProjectPath, openProject } = useWorkspace()
   const [req, setReq] = useState<RequirementsFile | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<string>('requirements')
 
   useEffect(() => {
     let cancelled = false
@@ -84,13 +86,15 @@ export function ProjectView() {
         </div>
       </div>
 
-      <Tabs defaultValue="requirements" className="flex-1 flex flex-col min-h-0">
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="flex-1 flex flex-col min-h-0"
+      >
         <div className="px-6 pt-3 border-b">
           <TabsList>
             <TabsTrigger value="requirements">Requirements</TabsTrigger>
-            <TabsTrigger value="design" disabled>
-              Design
-            </TabsTrigger>
+            <TabsTrigger value="design">Design</TabsTrigger>
             <TabsTrigger value="rack" disabled>
               Rack View
             </TabsTrigger>
@@ -117,6 +121,18 @@ export function ProjectView() {
               initial={req}
               projectPath={currentProjectPath}
               onSaved={setReq}
+            />
+          )}
+        </TabsContent>
+        <TabsContent value="design" className="flex-1 min-h-0 m-0">
+          {loading || !req ? (
+            <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+          ) : (
+            <DesignView
+              requirements={req}
+              projectPath={currentProjectPath}
+              onRequirementsChanged={setReq}
+              onEditRequirements={() => setActiveTab('requirements')}
             />
           )}
         </TabsContent>

@@ -24,14 +24,25 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
-### 2026-05-12 — Per-leaf input-mode editor UX
-- **Context:** Phase 3 captured `input_mode` (aggregate vs per_leaf) in `requirements.yaml`
-  but only wired the aggregate path in the form. Per-leaf overrides need a UI that scales
-  to 64-port leaves without one-cell-per-port tedium (Open Risk #4).
-- **What's likely needed:** in the Design screen, when `input_mode == per_leaf`, expose a
-  bulk-assign mode like "set ports 1–48 to 25G, 49–64 to 100G" plus a per-port table for
-  exceptions. Save into `per_leaf_overrides` on `requirements.yaml`.
-- **Revisit:** Phase 4 (Design screen).
+### 2026-05-12 — Per-leaf input-mode editor (Phase 4b)
+- **Context:** Phase 4 shipped the aggregate-mode end-to-end path (`requirements →
+  Generate → design.yaml`) plus an input-mode toggle stub. When the toggle flips to
+  `per_leaf`, the Design tab shows a placeholder Card and disables Generate. Building
+  the real per-leaf path needs both UI (bulk-assign + exceptions table for 64-port
+  leaves — Open Risk #4) **and** solver work (`TierRequest` has no
+  `per_leaf_overrides` field today; the Phase 2 solver only consumes aggregate inputs).
+- **What's likely needed:**
+  1. Schema: add `per_leaf_overrides: [{leaf_index, ports: [{port_index, speed_g}]}]`
+     to `TierRow` in `src/renderer/src/schemas/project.ts` and a parallel
+     `TierRequest.per_leaf_overrides` field in `src/domain/types.ts`.
+  2. Solver: extend `computeTier` to honor per-port speeds (host BW becomes the sum of
+     per-port speeds for that leaf rather than `host_ports × host_speed`).
+  3. UI on the Design tab: bulk-assign form ("ports 1–48 → 25G, 49–64 → 100G"), per-port
+     exceptions table, copy-leaf-config-to-other-leaves shortcut.
+  4. Tests: extend `tier.test.ts` + `solver.test.ts` with mixed-port-speed cases.
+- **Why open:** non-trivial UX work + solver extension; kept out of Phase 4 to preserve
+  its clean boundary (Q1 interview answer 2026-05-12).
+- **Revisit:** Phase 4b, scheduled after Phase 5 (Rack View) ships unless user re-prioritizes.
 
 ### 2026-05-12 — Patch-panel dropdown when breakout pairs have connector mismatch
 - **Context:** Phase 2 solver emits `BREAKOUT_PATCH_PANEL_NEEDED` when the verified breakout
@@ -60,6 +71,25 @@ next time we hit a similar shape of problem.
 ---
 
 ## Resolved (recent)
+
+### 2026-05-12 — `design.yaml` persistence + Design-tab UI scope → resolved
+Phase 4 wrote `design.yaml` as the raw `DesignResult` shape (no zod schema yet — first
+read-back consumer is Phase 5). DesignView is **view + generate only** per Q3
+(2026-05-12): inputs come from `requirements.yaml`, only the input-mode toggle is
+live-editable on the tab, and an **Edit requirements** button jumps back to the
+Requirements tab via controlled Radix Tabs in `ProjectView.tsx`. Results panel is the
+**inline rich** breakdown (summary + warnings + per-tier + spine sizing + breakout +
+optics BOM hint + rack layout) per Q2 (2026-05-12). Implementation in
+`src/renderer/src/views/project/DesignView.tsx`.
+
+### 2026-05-12 — `breakout_pairs.yaml` workspace plumbing → resolved
+Per Q4 (2026-05-12), extended `ensureWorkspace` in `src/main/index.ts` to copy
+`seed/breakout_pairs.yaml` → `workspace/library/breakout_pairs.yaml` on first run.
+Renderer loads via existing `dcn.readYaml` IPC through new helpers
+`libraryBreakoutPairsPath` + `loadBreakoutPairs` in `src/renderer/src/lib/library-io.ts`;
+both `fileExists`-guard and zod-validate, returning `[]` if the file is missing
+(handles older workspaces predating Phase 4 bootstrap without crashing). No new IPC
+surface was added.
 
 ### 2026-05-12 — "Any updates to switches?" prompt location → resolved
 Banner lives at the top of the Requirements screen as a yellow-tinted Card with

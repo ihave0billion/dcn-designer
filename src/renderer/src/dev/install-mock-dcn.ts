@@ -138,6 +138,36 @@ export function installMockDcn(): void {
   // save + reload round-trip in browser preview without a real filesystem.
   const requirementsFiles = new Map<string, AnyRecord>()
 
+  // Per-project design.yaml content (Phase 4 — solver output round-trip).
+  const designFiles = new Map<string, AnyRecord>()
+
+  // breakout_pairs.yaml mirror — seeded into every mock workspace.
+  // Same two verified pairs as `seed/breakout_pairs.yaml` so the solver
+  // matches verified-pair lookups in browser preview.
+  const breakoutPairs = {
+    schema_version: 1,
+    pairs: [
+      {
+        spine_pid: 'QDD-400G-BD',
+        leaf_pid: 'QSFP-100G-SR1.2',
+        fanout: 1,
+        spine_connector: 'LC (UPC)',
+        leaf_connector: 'LC (UPC)',
+        requires_patch_panel: false,
+        verified_by: 'mock-seed'
+      },
+      {
+        spine_pid: 'QDD-400G-SR4.2',
+        leaf_pid: 'QSFP-100G-SR1.2',
+        fanout: 4,
+        spine_connector: 'MPO-12 (UPC)',
+        leaf_connector: 'LC (UPC)',
+        requires_patch_panel: true,
+        verified_by: 'mock-seed'
+      }
+    ]
+  }
+
   function opticsPathFor(switchId: string): string {
     return `/mock-workspace/library/optics/${switchId}.yaml`
   }
@@ -149,11 +179,17 @@ export function installMockDcn(): void {
     readYaml: async <T = unknown>(filePath: string): Promise<T> => {
       if (filePath.endsWith('switches.yaml')) return { schema_version: 1, switches: structuredClone(switches) } as T
       if (filePath.endsWith('servers.yaml')) return { schema_version: 1, servers: structuredClone(servers) } as T
+      if (filePath.endsWith('breakout_pairs.yaml')) return structuredClone(breakoutPairs) as T
       if (filePath.endsWith('requirements.yaml')) {
         const cached = requirementsFiles.get(filePath)
         if (cached) return structuredClone(cached) as T
         const now = new Date().toISOString()
         return { schema_version: 1, project: { name: 'mock-proj', customer: 'Mock Co.', site: '', created: now, last_edited: now } } as T
+      }
+      if (filePath.endsWith('design.yaml')) {
+        const cached = designFiles.get(filePath)
+        if (cached) return structuredClone(cached) as T
+        throw new Error(`[mock] no design file at ${filePath}`)
       }
       if (filePath.includes('/library/optics/')) {
         const cached = opticsFiles.get(filePath)
@@ -174,9 +210,20 @@ export function installMockDcn(): void {
         opticsFiles.set(filePath, structuredClone(data as AnyRecord))
       } else if (filePath.endsWith('requirements.yaml')) {
         requirementsFiles.set(filePath, structuredClone(data as AnyRecord))
+      } else if (filePath.endsWith('design.yaml')) {
+        designFiles.set(filePath, structuredClone(data as AnyRecord))
       }
     },
-    fileExists: async () => true,
+    fileExists: async (filePath: string) => {
+      // Files that always exist in the mock workspace
+      if (filePath.endsWith('switches.yaml')) return true
+      if (filePath.endsWith('servers.yaml')) return true
+      if (filePath.endsWith('breakout_pairs.yaml')) return true
+      if (filePath.endsWith('requirements.yaml')) return requirementsFiles.has(filePath)
+      if (filePath.endsWith('design.yaml')) return designFiles.has(filePath)
+      if (filePath.includes('/library/optics/')) return opticsFiles.has(filePath)
+      return false
+    },
     listProjects: async () =>
       projects.map((p) => {
         const reqPath = `${p.path}/requirements.yaml`

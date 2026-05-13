@@ -50,7 +50,7 @@ function registerIpc(): void {
     // Copy seeds if missing
     const seedDir = seedSourceDir()
     const copied: string[] = []
-    for (const seedFile of ['switches.yaml', 'servers.yaml']) {
+    for (const seedFile of ['switches.yaml', 'servers.yaml', 'breakout_pairs.yaml']) {
       const src = join(seedDir, seedFile)
       const dst = join(workspacePath, 'library', seedFile)
       if (existsSync(src) && (await copyIfMissing(src, dst))) {

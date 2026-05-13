@@ -12,6 +12,7 @@
     "paths": {
       "@renderer/*": ["src/renderer/src/*"],
       "@/*": ["src/renderer/src/*"],
+      "@domain": ["src/domain/index.ts"],
       "@domain/*": ["src/domain/*"]
     }
   }

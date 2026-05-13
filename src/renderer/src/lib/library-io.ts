@@ -1,6 +1,7 @@
 import { SwitchesFileSchema, type SwitchesFile, type Switch } from '@/schemas/switches'
 import { ServersFileSchema, type ServersFile, type Server } from '@/schemas/servers'
 import { OpticsFileSchema, type OpticsFile, type Optic } from '@/schemas/optics'
+import { BreakoutPairsFileSchema, type BreakoutPair, type BreakoutPairsFile } from '@domain'
 
 export function librarySwitchesPath(workspacePath: string): string {
   return `${workspacePath}/library/switches.yaml`
@@ -80,3 +81,29 @@ export async function saveOpticsFile(
   }
   await window.dcn.writeYaml(libraryOpticsPath(workspacePath, switchId), parsed.data)
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Breakout pairs — curated optic-pair list consumed by the solver
+// (seeded into workspace/library/breakout_pairs.yaml on first run)
+// ────────────────────────────────────────────────────────────────────
+
+export function libraryBreakoutPairsPath(workspacePath: string): string {
+  return `${workspacePath}/library/breakout_pairs.yaml`
+}
+
+// Returns [] when the file is missing (older workspaces predate Phase 4 bootstrap).
+// The solver treats an empty list as "no breakout suggestions available" and
+// continues without crashing.
+export async function loadBreakoutPairs(workspacePath: string): Promise<BreakoutPair[]> {
+  const path = libraryBreakoutPairsPath(workspacePath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return []
+  const raw = await window.dcn.readYaml(path)
+  const parsed = BreakoutPairsFileSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`breakout_pairs.yaml schema validation failed: ${parsed.error.message}`)
+  }
+  return parsed.data.pairs
+}
+
+export type { BreakoutPair, BreakoutPairsFile }
