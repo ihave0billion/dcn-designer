@@ -9,6 +9,7 @@ const dcn: DcnApi = {
   readYaml: (filePath) => ipcRenderer.invoke('dcn:read-yaml', filePath),
   writeYaml: (filePath, data) => ipcRenderer.invoke('dcn:write-yaml', filePath, data),
   fileExists: (filePath) => ipcRenderer.invoke('dcn:file-exists', filePath),
+  deleteFile: (filePath) => ipcRenderer.invoke('dcn:delete-file', filePath),
   listProjects: (workspacePath) => ipcRenderer.invoke('dcn:list-projects', workspacePath),
   createProject: (workspacePath, name, customer) =>
     ipcRenderer.invoke('dcn:create-project', workspacePath, name, customer),

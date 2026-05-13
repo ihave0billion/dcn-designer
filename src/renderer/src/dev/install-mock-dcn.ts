@@ -141,6 +141,9 @@ export function installMockDcn(): void {
   // Per-project design.yaml content (Phase 4 — solver output round-trip).
   const designFiles = new Map<string, AnyRecord>()
 
+  // Per-project rack_mapping.yaml content (Phase 5 — user-curated fork).
+  const rackMappingFiles = new Map<string, AnyRecord>()
+
   // breakout_pairs.yaml mirror — seeded into every mock workspace.
   // Same two verified pairs as `seed/breakout_pairs.yaml` so the solver
   // matches verified-pair lookups in browser preview.
@@ -191,6 +194,11 @@ export function installMockDcn(): void {
         if (cached) return structuredClone(cached) as T
         throw new Error(`[mock] no design file at ${filePath}`)
       }
+      if (filePath.endsWith('rack_mapping.yaml')) {
+        const cached = rackMappingFiles.get(filePath)
+        if (cached) return structuredClone(cached) as T
+        throw new Error(`[mock] no rack_mapping file at ${filePath}`)
+      }
       if (filePath.includes('/library/optics/')) {
         const cached = opticsFiles.get(filePath)
         if (cached) return structuredClone(cached) as T
@@ -212,6 +220,8 @@ export function installMockDcn(): void {
         requirementsFiles.set(filePath, structuredClone(data as AnyRecord))
       } else if (filePath.endsWith('design.yaml')) {
         designFiles.set(filePath, structuredClone(data as AnyRecord))
+      } else if (filePath.endsWith('rack_mapping.yaml')) {
+        rackMappingFiles.set(filePath, structuredClone(data as AnyRecord))
       }
     },
     fileExists: async (filePath: string) => {
@@ -221,8 +231,15 @@ export function installMockDcn(): void {
       if (filePath.endsWith('breakout_pairs.yaml')) return true
       if (filePath.endsWith('requirements.yaml')) return requirementsFiles.has(filePath)
       if (filePath.endsWith('design.yaml')) return designFiles.has(filePath)
+      if (filePath.endsWith('rack_mapping.yaml')) return rackMappingFiles.has(filePath)
       if (filePath.includes('/library/optics/')) return opticsFiles.has(filePath)
       return false
+    },
+    deleteFile: async (filePath: string) => {
+      if (filePath.endsWith('rack_mapping.yaml')) rackMappingFiles.delete(filePath)
+      else if (filePath.endsWith('design.yaml')) designFiles.delete(filePath)
+      else if (filePath.endsWith('requirements.yaml')) requirementsFiles.delete(filePath)
+      else if (filePath.includes('/library/optics/')) opticsFiles.delete(filePath)
     },
     listProjects: async () =>
       projects.map((p) => {

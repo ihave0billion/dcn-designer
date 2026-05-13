@@ -6,6 +6,7 @@ import { useWorkspace } from '@/state/WorkspaceContext'
 import { RequirementsFileSchema, type RequirementsFile, emptyRequirements } from '@/schemas/project'
 import { RequirementsView } from './RequirementsView'
 import { DesignView } from './DesignView'
+import { RackView } from './RackView'
 
 export function ProjectView() {
   const { currentProjectPath, openProject } = useWorkspace()
@@ -95,9 +96,7 @@ export function ProjectView() {
           <TabsList>
             <TabsTrigger value="requirements">Requirements</TabsTrigger>
             <TabsTrigger value="design">Design</TabsTrigger>
-            <TabsTrigger value="rack" disabled>
-              Rack View
-            </TabsTrigger>
+            <TabsTrigger value="rack">Rack View</TabsTrigger>
             <TabsTrigger value="links" disabled>
               Links
             </TabsTrigger>
@@ -133,6 +132,18 @@ export function ProjectView() {
               projectPath={currentProjectPath}
               onRequirementsChanged={setReq}
               onEditRequirements={() => setActiveTab('requirements')}
+            />
+          )}
+        </TabsContent>
+        <TabsContent value="rack" className="flex-1 min-h-0 m-0">
+          {loading || !req ? (
+            <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+          ) : (
+            <RackView
+              requirements={req}
+              projectPath={currentProjectPath}
+              onRequirementsChanged={setReq}
+              onGoToDesign={() => setActiveTab('design')}
             />
           )}
         </TabsContent>

@@ -75,6 +75,12 @@ function registerIpc(): void {
     return existsSync(filePath)
   })
 
+  ipcMain.handle('dcn:delete-file', async (_e, filePath: string) => {
+    if (existsSync(filePath)) {
+      await fs.unlink(filePath)
+    }
+  })
+
   ipcMain.handle('dcn:list-projects', async (_e, workspacePath: string) => {
     const projectsDir = join(workspacePath, 'projects')
     if (!existsSync(projectsDir)) return []

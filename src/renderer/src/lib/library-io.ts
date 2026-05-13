@@ -1,6 +1,7 @@
 import { SwitchesFileSchema, type SwitchesFile, type Switch } from '@/schemas/switches'
 import { ServersFileSchema, type ServersFile, type Server } from '@/schemas/servers'
 import { OpticsFileSchema, type OpticsFile, type Optic } from '@/schemas/optics'
+import { RackMappingFileSchema, type RackMappingFile } from '@/schemas/rack-mapping'
 import { BreakoutPairsFileSchema, type BreakoutPair, type BreakoutPairsFile } from '@domain'
 
 export function librarySwitchesPath(workspacePath: string): string {
@@ -107,3 +108,45 @@ export async function loadBreakoutPairs(workspacePath: string): Promise<Breakout
 }
 
 export type { BreakoutPair, BreakoutPairsFile }
+
+// ────────────────────────────────────────────────────────────────────
+// Rack mapping — user-curated rack layout (Phase 5)
+// Lives at <project>/rack_mapping.yaml. Absent = solver layout still
+// in effect; present = user has forked.
+// ────────────────────────────────────────────────────────────────────
+
+export function rackMappingPath(projectPath: string): string {
+  return `${projectPath}/rack_mapping.yaml`
+}
+
+export async function loadRackMapping(projectPath: string): Promise<RackMappingFile | null> {
+  const path = rackMappingPath(projectPath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return null
+  const raw = await window.dcn.readYaml(path)
+  const parsed = RackMappingFileSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`rack_mapping.yaml schema validation failed: ${parsed.error.message}`)
+  }
+  return parsed.data
+}
+
+export async function saveRackMapping(
+  projectPath: string,
+  mapping: RackMappingFile
+): Promise<void> {
+  const parsed = RackMappingFileSchema.safeParse(mapping)
+  if (!parsed.success) {
+    throw new Error(`rack_mapping.yaml schema validation failed before save: ${parsed.error.message}`)
+  }
+  await window.dcn.writeYaml(rackMappingPath(projectPath), parsed.data)
+}
+
+export async function deleteRackMapping(projectPath: string): Promise<void> {
+  const path = rackMappingPath(projectPath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return
+  await window.dcn.deleteFile(path)
+}
+
+export type { RackMappingFile }

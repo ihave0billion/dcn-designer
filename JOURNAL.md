@@ -24,6 +24,37 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-05-13 — Solver-regen drift detection for forked rack layouts (Phase 5 follow-up)
+- **Context:** Phase 5 implements auto-fork on first edit (`rack_mapping.yaml` becomes
+  source of truth, solver-regen leaves it alone). When the user later changes requirements
+  and re-Generates a design, the new `design.yaml.rack_layout` may contain devices
+  the fork doesn't have (e.g. user added a tier → 3 new leaves), or have lost devices the
+  fork still references. Today the Rack View shows only what's in the fork; the user must
+  click **Reset to solver layout** to wholesale discard their edits and pick up the new
+  devices. No "merge in 3 new devices" affordance exists.
+- **What's likely needed:** on mount, compare `mapping.racks[*].devices[*].device_id`
+  against `design.yaml.rack_layout[*].devices[*].device_id`. If sets differ, surface a
+  banner with a count (e.g. "Solver has 3 new devices since you forked: leaf-7, leaf-8,
+  leaf-9. [Add them to a rack] [Reset to solver layout] [Dismiss]"). Add-them route could
+  drop them into the rack the solver picked, but flag conflicts when start_u is taken.
+- **Why open:** real but not blocking — single-user workflow usually iterates one direction
+  (requirements → solver → racks → done). The drift case mostly bites when revisiting an
+  older project. Tracking so it doesn't get forgotten.
+- **Revisit:** after Phases 6–7 ship (Cable Links and Topology will hit similar drift
+  patterns); fold all three into a unified "regenerate-aware editing" pass.
+
+### 2026-05-13 — Drag-and-drop device reordering within a rack (Phase 10 polish)
+- **Context:** Phase 5 Q3 picked click-to-select + side-panel form for editing device
+  position. Reasonable for v1, but for rapid placement (e.g. moving 8 leaves around a
+  pod), drag-and-drop is the natural interaction. PROJECT_PLAN Open Risk #4 (per-leaf
+  port-map UX at 64 ports) is similar in spirit — both want bulk/spatial editing.
+- **What's likely needed:** `@dnd-kit/core` integration, collision detection against
+  existing devices (no overlap allowed), maybe a snap-grid at 1U increments. Keep
+  click-to-select as the fallback for accessibility.
+- **Why open:** non-trivial work that's only worth doing once we have realistic usage
+  patterns. Phase 5 v1 is fully functional without it.
+- **Revisit:** Phase 10 (Summary + Polish).
+
 ### 2026-05-12 — Per-leaf input-mode editor (Phase 4b)
 - **Context:** Phase 4 shipped the aggregate-mode end-to-end path (`requirements →
   Generate → design.yaml`) plus an input-mode toggle stub. When the toggle flips to
@@ -118,6 +149,28 @@ earlier interim commit was dropped before the recommit.
 ---
 
 ## Errors / failures and resolutions
+
+### 2026-05-13 — RackView mount-effect yanked selection back to first rack on +Add rack
+- **Symptom:** Clicking **+ Add rack** in the Rack View sidebar created a new rack
+  successfully (file written), but the right-side panel kept showing the first rack's
+  settings (Rack A) instead of switching to the new rack. The new rack appeared in the
+  sidebar but couldn't be edited because it was never selected.
+- **Root cause:** Initial implementation reused the Phase 4 pattern of keying the
+  data-load `useEffect` on `[workspacePath, projectPath, requirements.racks.length]`.
+  Each time a rack was added (length 2 → 3), the effect re-ran and reset
+  `selectedRackId` to `requirements.racks[0].name`. The `setSelectedRackId(name)` call
+  inside `handleAddRack` was racing with — and losing to — that effect.
+- **Fix:** Split the mount-effect into two:
+  1. A data-loading effect keyed only on `[workspacePath, projectPath]` — runs once per
+     project open, loads switches/servers/design/mapping, never touches selection.
+  2. A separate selection-sync effect keyed on `[requirements.racks, selectedRackId]`:
+     - First mount with racks present and `selectedRackId == null` → pick the first.
+     - Subsequent updates: only clear `selectedRackId` if the named rack disappeared
+       (delete or rename without atomic sync). Adding a rack is a no-op here.
+- **Lesson:** Don't tie heavy data loading to mutable inventory size — separate the
+  "what data should be loaded for this entity" effect from the "keep derived UI state
+  consistent with prop changes" effect. When in doubt, model each effect's input as
+  precisely as possible.
 
 ### 2026-05-12 — `@/*` alias unresolved in renderer-only browser preview
 - **Symptom:** After starting `vite --config electron.vite.config.ts --mode development src/renderer`,

@@ -19,6 +19,7 @@ export interface DcnApi {
   readYaml<T = unknown>(filePath: string): Promise<T>
   writeYaml(filePath: string, data: unknown): Promise<void>
   fileExists(filePath: string): Promise<boolean>
+  deleteFile(filePath: string): Promise<void>
   listProjects(workspacePath: string): Promise<DcnProjectListEntry[]>
   createProject(workspacePath: string, name: string, customer: string): Promise<string>
   showImportPicker(): Promise<string | null>
