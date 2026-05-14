@@ -1,0 +1,69 @@
+# DCN Designer — curated patch-panel / breakout-cassette library
+#
+# The solver flags BREAKOUT_PATCH_PANEL_NEEDED when a verified breakout
+# pair has mismatched connectors (e.g. MPO-12 ↔ LC). The Cable Links UI
+# uses this file to populate the "Patch panel" dropdown for those links.
+#
+# When no curated entry matches the (spine_connector, leaf_connector)
+# pair on a link, the UI synthesises a placeholder SKU of the form
+# `PP-<spine>-<leaf>` (e.g. `PP-MPO12-LC`) so the link still carries a
+# stable identifier. The user can swap in a curated SKU later.
+#
+# Schema:
+#   id                : SKU / placeholder ID — must be unique
+#   vendor            : Panduit / Corning / Cisco / …
+#   description       : human-readable summary
+#   connector_a       : connector on the "high-port-density" side
+#                       (matches spine_connector for breakout links)
+#   connector_b       : connector on the "fan-out" side
+#                       (matches leaf_connector for breakout links)
+#   fanout            : number of B-side ports fed by one A-side port
+#   media             : MMF | SMF | Copper
+#   notes             : free text
+#   data_sheet_url    : optional
+
+schema_version: 1
+
+patch_panels:
+  - id: PANDUIT-FAP12WBLAQ
+    vendor: Panduit
+    description: 12-fiber MPO-12 to 6× LC duplex cassette, OM4
+    connector_a: MPO-12 (UPC)
+    connector_b: LC (UPC)
+    fanout: 6
+    media: MMF
+    notes: One MPO-12 trunk feeds 6 duplex LC ports (12 fibers ÷ 2 fibers/duplex).
+    data_sheet_url: null
+
+  - id: CORNING-CCH-CS12-A9-P00RE
+    vendor: Corning
+    description: 12-fiber MPO-12 to 6× LC duplex cassette, single-mode UPC
+    connector_a: MPO-12 (UPC)
+    connector_b: LC (UPC)
+    fanout: 6
+    media: SMF
+    notes: SMF equivalent of the Panduit cassette above. Same fan-out math.
+    data_sheet_url: null
+
+  - id: CISCO-BREAKOUT-MOD-MPO12-LC
+    vendor: Cisco
+    description: Generic Cisco-supplied MPO-12 to 4× LC breakout module
+    connector_a: MPO-12 (UPC)
+    connector_b: LC (UPC)
+    fanout: 4
+    media: MMF
+    notes: >
+      Placeholder Cisco-branded option for the QDD-400G-SR4.2 →
+      4× QSFP-100G-SR1.2 use case. Replace with the actual ordering
+      PID once confirmed.
+    data_sheet_url: null
+
+  - id: PANDUIT-FAPH08X
+    vendor: Panduit
+    description: 8-fiber MPO-8 to 4× LC duplex cassette, OM4
+    connector_a: MPO-8 (UPC)
+    connector_b: LC (UPC)
+    fanout: 4
+    media: MMF
+    notes: For 200G/400G optics that present an MPO-8 face.
+    data_sheet_url: null

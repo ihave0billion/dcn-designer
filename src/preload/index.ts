@@ -18,6 +18,9 @@ const dcn: DcnApi = {
     ipcRenderer.invoke('dcn:import-project', workspacePath, sourcePath, copy),
   showCsvPicker: (title) => ipcRenderer.invoke('dcn:show-csv-picker', title),
   readTextFile: (filePath) => ipcRenderer.invoke('dcn:read-text-file', filePath),
+  writeTextFile: (filePath, text) => ipcRenderer.invoke('dcn:write-text-file', filePath, text),
+  showSaveCsvPicker: (title, defaultName) =>
+    ipcRenderer.invoke('dcn:show-save-csv-picker', title, defaultName),
   listOptics: (workspacePath) => ipcRenderer.invoke('dcn:list-optics', workspacePath),
   deleteOptics: (workspacePath, switchId) =>
     ipcRenderer.invoke('dcn:delete-optics', workspacePath, switchId)

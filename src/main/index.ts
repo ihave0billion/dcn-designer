@@ -50,7 +50,7 @@ function registerIpc(): void {
     // Copy seeds if missing
     const seedDir = seedSourceDir()
     const copied: string[] = []
-    for (const seedFile of ['switches.yaml', 'servers.yaml', 'breakout_pairs.yaml']) {
+    for (const seedFile of ['switches.yaml', 'servers.yaml', 'breakout_pairs.yaml', 'patch_panels.yaml']) {
       const src = join(seedDir, seedFile)
       const dst = join(workspacePath, 'library', seedFile)
       if (existsSync(src) && (await copyIfMissing(src, dst))) {
@@ -162,6 +162,24 @@ function registerIpc(): void {
 
   ipcMain.handle('dcn:read-text-file', async (_e, filePath: string) => {
     return fs.readFile(filePath, 'utf8')
+  })
+
+  ipcMain.handle('dcn:write-text-file', async (_e, filePath: string, text: string) => {
+    await fs.mkdir(dirname(filePath), { recursive: true })
+    await fs.writeFile(filePath, text, 'utf8')
+  })
+
+  ipcMain.handle('dcn:show-save-csv-picker', async (_e, title: string, defaultName: string) => {
+    const result = await dialog.showSaveDialog({
+      title: title || 'Export CSV',
+      defaultPath: defaultName || 'export.csv',
+      filters: [
+        { name: 'CSV', extensions: ['csv'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || !result.filePath) return null
+    return result.filePath
   })
 
   ipcMain.handle('dcn:list-optics', async (_e, workspacePath: string) => {

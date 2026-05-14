@@ -24,8 +24,15 @@ import {
   type InputMode
 } from '@/schemas/project'
 import type { Switch } from '@/schemas/switches'
-import { loadBreakoutPairs, loadSwitchesFile } from '@/lib/library-io'
+import {
+  loadBreakoutPairs,
+  loadCableLinks,
+  loadPatchPanels,
+  loadSwitchesFile,
+  saveCableLinks
+} from '@/lib/library-io'
 import { runSolver } from '@/lib/solver-bridge'
+import { seedCableLinks } from '@/lib/cable-links-seeder'
 import { useWorkspace } from '@/state/WorkspaceContext'
 import type {
   DesignResult,
@@ -117,6 +124,36 @@ export function DesignView({
       const design = runSolver({ requirements, switches, breakoutPairs })
       await window.dcn.writeYaml(`${projectPath}/design.yaml`, design)
       setResult(design)
+      // Auto-seed cable_links.yaml when no user fork exists. Mirrors the
+      // Phase 5 rack_mapping fork pattern — once the user edits links,
+      // source flips to 'user' and Generate stops touching the file.
+      try {
+        const existing = await loadCableLinks(projectPath)
+        if (existing == null || existing.source === 'solver') {
+          const patchPanels = await loadPatchPanels(workspacePath)
+          const seeded = seedCableLinks({
+            design,
+            switches,
+            fabric: {
+              uplinks_per_leaf: requirements.fabric.uplinks_per_leaf,
+              uplinks_per_spine: requirements.fabric.uplinks_per_spine
+            },
+            breakoutPairs,
+            patchPanels
+          })
+          await saveCableLinks(projectPath, {
+            schema_version: 1,
+            source: 'solver',
+            seeded_at: new Date().toISOString(),
+            forked_at: null,
+            links: seeded.links
+          })
+        }
+      } catch (seedErr) {
+        // Don't block the design save on a seed failure — surface it.
+        // eslint-disable-next-line no-console
+        console.warn('[cable-links seed] failed:', seedErr)
+      }
     } catch (e) {
       setGenErr(e instanceof Error ? e.message : String(e))
     } finally {

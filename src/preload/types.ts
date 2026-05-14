@@ -26,6 +26,8 @@ export interface DcnApi {
   importProject(workspacePath: string, sourcePath: string, copy: boolean): Promise<string>
   showCsvPicker(title: string): Promise<{ path: string; basename: string } | null>
   readTextFile(filePath: string): Promise<string>
+  writeTextFile(filePath: string, text: string): Promise<void>
+  showSaveCsvPicker(title: string, defaultName: string): Promise<string | null>
   listOptics(workspacePath: string): Promise<DcnOpticsIndexEntry[]>
   deleteOptics(workspacePath: string, switchId: string): Promise<void>
 }

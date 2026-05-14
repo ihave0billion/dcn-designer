@@ -13,7 +13,11 @@ export default defineConfig({
     }
   },
   test: {
-    include: ['src/domain/**/*.test.ts', 'src/domain/**/*.spec.ts'],
+    include: [
+      'src/domain/**/*.test.ts',
+      'src/domain/**/*.spec.ts',
+      'src/renderer/src/lib/**/*.test.ts'
+    ],
     environment: 'node',
     globals: false
   }

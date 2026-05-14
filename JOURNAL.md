@@ -24,24 +24,45 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
-### 2026-05-13 — Solver-regen drift detection for forked rack layouts (Phase 5 follow-up)
-- **Context:** Phase 5 implements auto-fork on first edit (`rack_mapping.yaml` becomes
-  source of truth, solver-regen leaves it alone). When the user later changes requirements
-  and re-Generates a design, the new `design.yaml.rack_layout` may contain devices
-  the fork doesn't have (e.g. user added a tier → 3 new leaves), or have lost devices the
-  fork still references. Today the Rack View shows only what's in the fork; the user must
-  click **Reset to solver layout** to wholesale discard their edits and pick up the new
-  devices. No "merge in 3 new devices" affordance exists.
-- **What's likely needed:** on mount, compare `mapping.racks[*].devices[*].device_id`
-  against `design.yaml.rack_layout[*].devices[*].device_id`. If sets differ, surface a
-  banner with a count (e.g. "Solver has 3 new devices since you forked: leaf-7, leaf-8,
-  leaf-9. [Add them to a rack] [Reset to solver layout] [Dismiss]"). Add-them route could
-  drop them into the rack the solver picked, but flag conflicts when start_u is taken.
+### 2026-05-13 — Solver-regen drift detection for forked rack layouts AND forked cable links (Phases 5 + 6 follow-up)
+- **Context:** Both Phase 5 (`rack_mapping.yaml`) and Phase 6 (`cable_links.yaml`)
+  implement auto-fork on first edit — the file becomes the source of truth, solver-regen
+  leaves it alone. When the user later changes requirements and re-Generates the design,
+  the new `design.yaml` may contain devices / ports the fork doesn't have (e.g. user added
+  a tier → 3 new leaves), or have lost devices/ports the fork still references. Today
+  both views show only what's in their fork; the user must click **Reset to solver
+  layout** to wholesale discard their edits and pick up the new devices. No "merge in
+  3 new devices" affordance exists for either file.
+- **What's likely needed:** on mount, compute set differences between fork and current
+  design output:
+  - Rack View: `mapping.racks[*].devices[*].device_id` vs.
+    `design.yaml.rack_layout[*].devices[*].device_id`
+  - Links View: spines/leaves referenced in `cable_links.yaml.links[*].device_a/b.device_id`
+    vs. the spines + leaves the new design produces
+  Surface a banner with the diff (e.g. "Solver has 3 new devices since you forked: leaf-7,
+  leaf-8, leaf-9. [Add them] [Reset to solver layout] [Dismiss]"). Add-them route drops
+  them into the rack/link slot the solver picked, but flags conflicts when start_u or
+  ports are taken.
 - **Why open:** real but not blocking — single-user workflow usually iterates one direction
-  (requirements → solver → racks → done). The drift case mostly bites when revisiting an
-  older project. Tracking so it doesn't get forgotten.
-- **Revisit:** after Phases 6–7 ship (Cable Links and Topology will hit similar drift
-  patterns); fold all three into a unified "regenerate-aware editing" pass.
+  (requirements → solver → racks/links → done). The drift case mostly bites when revisiting
+  an older project.
+- **Revisit:** after Phase 7 ships (Topology will hit the same shape); fold all three into
+  a unified "regenerate-aware editing" pass.
+
+### 2026-05-13 — New Link form Radix-Select dropdowns hard to drive via browser-preview eval
+- **Context:** Phase 6 verification of the New Link dialog couldn't fully exercise the
+  Radix Select dropdowns (spine device, spine port, leaf device, leaf port, optic, patch
+  panel) because Radix portals the options outside the dialog DOM and only renders them
+  when opened. Programmatic `.click()` doesn't open the listbox; pointer events fire but
+  the portal contents aren't reachable via standard CSS selectors during eval. Manual
+  click in a real browser works.
+- **What's needed:** either accept that Selects are tested by unit tests on the underlying
+  helpers (`expandPortTemplate`, `resolvePatchPanel`) + Electron manual sanity, OR add
+  a thin in-page test harness that exposes the dialog's submit handler directly so
+  end-to-end verification doesn't depend on Radix portal interaction.
+- **Why open:** the helpers are well-covered by vitest (30 new tests in Phase 6) and the
+  dialog's logic is straightforward; not worth a custom harness right now.
+- **Revisit:** Phase 10 (Summary + Polish) if we add Playwright-driven smoke tests.
 
 ### 2026-05-13 — Drag-and-drop device reordering within a rack (Phase 10 polish)
 - **Context:** Phase 5 Q3 picked click-to-select + side-panel form for editing device
@@ -75,19 +96,6 @@ next time we hit a similar shape of problem.
   its clean boundary (Q1 interview answer 2026-05-12).
 - **Revisit:** Phase 4b, scheduled after Phase 5 (Rack View) ships unless user re-prioritizes.
 
-### 2026-05-12 — Patch-panel dropdown when breakout pairs have connector mismatch
-- **Context:** Phase 2 solver emits `BREAKOUT_PATCH_PANEL_NEEDED` when the verified breakout
-  pair's spine_connector ≠ leaf_connector (e.g. `QDD-400G-SR4.2` MPO-12 ↔ `QSFP-100G-SR1.2`
-  LC). User explicitly asked for a dropdown to pick the patch panel SKU at this point. The
-  warning surfaces in the solver output today; the UI piece is deferred to Cable Links.
-- **What's likely needed:** a `seed/patch_panels.yaml` library file with curated MPO↔LC
-  cassette / breakout-module SKUs, plus a "Patch Panel" dropdown in the Cable Links manager's
-  New Link form whenever the chosen spine + leaf optics imply a connector change. The dropdown
-  should default to a sensible cassette and persist into `cable_links.yaml`.
-- **Why open:** the dropdown UI doesn't exist yet (Cable Links manager arrives in Phase 6).
-- **Revisit:** Phase 6 (Cable Links manager) — design `patch_panels.yaml` and the dropdown
-  together.
-
 ### 2026-05-11 — Electron Forge vs electron-builder for packaging
 - **Context:** PROJECT_PLAN.md tech-stack table specifies Electron Forge. Phase 0 used
   `electron-vite` + `electron-builder` for cleaner dev ergonomics. Only matters at packaging time.
@@ -102,6 +110,18 @@ next time we hit a similar shape of problem.
 ---
 
 ## Resolved (recent)
+
+### 2026-05-13 — Patch-panel dropdown when breakout pairs have connector mismatch → resolved
+Shipped in Phase 6. `seed/patch_panels.yaml` carries 4 curated cassettes (Panduit/Corning
+MPO-12↔LC OM4 + SMF, Cisco MPO-12↔4×LC module, Panduit MPO-8↔4×LC). `patch-panel-resolver.ts`
+matches curated panels in either connector order via `connectorSlug` (strips UPC/APC
+parens + whitespace). When nothing matches, it returns a stable synthetic ID of the form
+`PP-<a>-<b>` (e.g. `PP-MPO12-LC`) plus an on-the-fly `syntheticPatchPanel` record so the
+dropdown can render a placeholder line. `cable-links-seeder.ts` calls the resolver when
+the design's breakout analysis reports `patch_panel_needed`, persists the chosen ID on
+every seeded link. `NewLinkDialog.tsx` builds the dropdown from curated panels + the
+synthetic placeholder driven by the chosen optic's `connector_type`. Persists to
+`cable_links.yaml.links[].patch_panel_id` (string-or-null).
 
 ### 2026-05-12 — `design.yaml` persistence + Design-tab UI scope → resolved
 Phase 4 wrote `design.yaml` as the raw `DesignResult` shape (no zod schema yet — first

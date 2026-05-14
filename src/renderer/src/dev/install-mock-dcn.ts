@@ -144,6 +144,41 @@ export function installMockDcn(): void {
   // Per-project rack_mapping.yaml content (Phase 5 — user-curated fork).
   const rackMappingFiles = new Map<string, AnyRecord>()
 
+  // Per-project cable_links.yaml content (Phase 6 — fabric uplink wiring).
+  const cableLinksFiles = new Map<string, AnyRecord>()
+
+  // Generic plain-text files (Phase 6 — CSV export round-trip).
+  const textFiles = new Map<string, string>()
+
+  // Curated patch-panel library (mirrors seed/patch_panels.yaml).
+  const patchPanels = {
+    schema_version: 1,
+    patch_panels: [
+      {
+        id: 'PANDUIT-FAP12WBLAQ',
+        vendor: 'Panduit',
+        description: '12-fiber MPO-12 to 6× LC duplex cassette, OM4',
+        connector_a: 'MPO-12 (UPC)',
+        connector_b: 'LC (UPC)',
+        fanout: 6,
+        media: 'MMF',
+        notes: null,
+        data_sheet_url: null
+      },
+      {
+        id: 'CISCO-BREAKOUT-MOD-MPO12-LC',
+        vendor: 'Cisco',
+        description: 'Generic Cisco MPO-12 to 4× LC breakout module',
+        connector_a: 'MPO-12 (UPC)',
+        connector_b: 'LC (UPC)',
+        fanout: 4,
+        media: 'MMF',
+        notes: null,
+        data_sheet_url: null
+      }
+    ]
+  }
+
   // breakout_pairs.yaml mirror — seeded into every mock workspace.
   // Same two verified pairs as `seed/breakout_pairs.yaml` so the solver
   // matches verified-pair lookups in browser preview.
@@ -183,6 +218,12 @@ export function installMockDcn(): void {
       if (filePath.endsWith('switches.yaml')) return { schema_version: 1, switches: structuredClone(switches) } as T
       if (filePath.endsWith('servers.yaml')) return { schema_version: 1, servers: structuredClone(servers) } as T
       if (filePath.endsWith('breakout_pairs.yaml')) return structuredClone(breakoutPairs) as T
+      if (filePath.endsWith('patch_panels.yaml')) return structuredClone(patchPanels) as T
+      if (filePath.endsWith('cable_links.yaml')) {
+        const cached = cableLinksFiles.get(filePath)
+        if (cached) return structuredClone(cached) as T
+        throw new Error(`[mock] no cable_links file at ${filePath}`)
+      }
       if (filePath.endsWith('requirements.yaml')) {
         const cached = requirementsFiles.get(filePath)
         if (cached) return structuredClone(cached) as T
@@ -222,6 +263,8 @@ export function installMockDcn(): void {
         designFiles.set(filePath, structuredClone(data as AnyRecord))
       } else if (filePath.endsWith('rack_mapping.yaml')) {
         rackMappingFiles.set(filePath, structuredClone(data as AnyRecord))
+      } else if (filePath.endsWith('cable_links.yaml')) {
+        cableLinksFiles.set(filePath, structuredClone(data as AnyRecord))
       }
     },
     fileExists: async (filePath: string) => {
@@ -229,14 +272,17 @@ export function installMockDcn(): void {
       if (filePath.endsWith('switches.yaml')) return true
       if (filePath.endsWith('servers.yaml')) return true
       if (filePath.endsWith('breakout_pairs.yaml')) return true
+      if (filePath.endsWith('patch_panels.yaml')) return true
       if (filePath.endsWith('requirements.yaml')) return requirementsFiles.has(filePath)
       if (filePath.endsWith('design.yaml')) return designFiles.has(filePath)
       if (filePath.endsWith('rack_mapping.yaml')) return rackMappingFiles.has(filePath)
+      if (filePath.endsWith('cable_links.yaml')) return cableLinksFiles.has(filePath)
       if (filePath.includes('/library/optics/')) return opticsFiles.has(filePath)
       return false
     },
     deleteFile: async (filePath: string) => {
       if (filePath.endsWith('rack_mapping.yaml')) rackMappingFiles.delete(filePath)
+      else if (filePath.endsWith('cable_links.yaml')) cableLinksFiles.delete(filePath)
       else if (filePath.endsWith('design.yaml')) designFiles.delete(filePath)
       else if (filePath.endsWith('requirements.yaml')) requirementsFiles.delete(filePath)
       else if (filePath.includes('/library/optics/')) opticsFiles.delete(filePath)
@@ -268,9 +314,16 @@ export function installMockDcn(): void {
     importProject: async () => '/mock-imported',
     showCsvPicker: async () => ({ path: '/mock/N9K-C9364D-GX2A-OPTICS.csv', basename: 'N9K-C9364D-GX2A-OPTICS.csv' }),
     readTextFile: async (filePath) => {
+      const stored = textFiles.get(filePath)
+      if (stored != null) return stored
       if (filePath.endsWith('.csv')) return MOCK_OPTICS_CSV
       throw new Error(`[mock] readTextFile not handled: ${filePath}`)
     },
+    writeTextFile: async (filePath, text) => {
+      textFiles.set(filePath, text)
+    },
+    showSaveCsvPicker: async (_title, defaultName) =>
+      `/mock-export/${defaultName || 'export.csv'}`,
     listOptics: async () => {
       const out: DcnOpticsIndexEntry[] = []
       for (const [path, content] of opticsFiles) {

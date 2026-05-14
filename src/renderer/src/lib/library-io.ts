@@ -2,6 +2,16 @@ import { SwitchesFileSchema, type SwitchesFile, type Switch } from '@/schemas/sw
 import { ServersFileSchema, type ServersFile, type Server } from '@/schemas/servers'
 import { OpticsFileSchema, type OpticsFile, type Optic } from '@/schemas/optics'
 import { RackMappingFileSchema, type RackMappingFile } from '@/schemas/rack-mapping'
+import {
+  PatchPanelsFileSchema,
+  type PatchPanel,
+  type PatchPanelsFile
+} from '@/schemas/patch-panels'
+import {
+  CableLinksFileSchema,
+  type CableLink,
+  type CableLinksFile
+} from '@/schemas/cable-links'
 import { BreakoutPairsFileSchema, type BreakoutPair, type BreakoutPairsFile } from '@domain'
 
 export function librarySwitchesPath(workspacePath: string): string {
@@ -150,3 +160,71 @@ export async function deleteRackMapping(projectPath: string): Promise<void> {
 }
 
 export type { RackMappingFile }
+
+// ────────────────────────────────────────────────────────────────────
+// Patch panels — curated MPO ↔ LC cassette library (Phase 6)
+// Seeded into workspace/library/patch_panels.yaml on first run.
+// ────────────────────────────────────────────────────────────────────
+
+export function libraryPatchPanelsPath(workspacePath: string): string {
+  return `${workspacePath}/library/patch_panels.yaml`
+}
+
+// Returns [] when the file is missing (older workspaces predate Phase 6
+// bootstrap). The synthetic-SKU fallback in patch-panel-resolver
+// handles connector pairs not in the curated list.
+export async function loadPatchPanels(workspacePath: string): Promise<PatchPanel[]> {
+  const path = libraryPatchPanelsPath(workspacePath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return []
+  const raw = await window.dcn.readYaml(path)
+  const parsed = PatchPanelsFileSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`patch_panels.yaml schema validation failed: ${parsed.error.message}`)
+  }
+  return parsed.data.patch_panels
+}
+
+export type { PatchPanel, PatchPanelsFile }
+
+// ────────────────────────────────────────────────────────────────────
+// Cable links — per project wiring file (Phase 6)
+// Lives at <project>/cable_links.yaml. Auto-seeded by Generate Design
+// when absent; first user edit flips source: 'user' + forked_at.
+// ────────────────────────────────────────────────────────────────────
+
+export function cableLinksPath(projectPath: string): string {
+  return `${projectPath}/cable_links.yaml`
+}
+
+export async function loadCableLinks(projectPath: string): Promise<CableLinksFile | null> {
+  const path = cableLinksPath(projectPath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return null
+  const raw = await window.dcn.readYaml(path)
+  const parsed = CableLinksFileSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`cable_links.yaml schema validation failed: ${parsed.error.message}`)
+  }
+  return parsed.data
+}
+
+export async function saveCableLinks(
+  projectPath: string,
+  file: CableLinksFile
+): Promise<void> {
+  const parsed = CableLinksFileSchema.safeParse(file)
+  if (!parsed.success) {
+    throw new Error(`cable_links.yaml schema validation failed before save: ${parsed.error.message}`)
+  }
+  await window.dcn.writeYaml(cableLinksPath(projectPath), parsed.data)
+}
+
+export async function deleteCableLinks(projectPath: string): Promise<void> {
+  const path = cableLinksPath(projectPath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return
+  await window.dcn.deleteFile(path)
+}
+
+export type { CableLink, CableLinksFile }
