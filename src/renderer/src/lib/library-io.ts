@@ -12,6 +12,10 @@ import {
   type CableLink,
   type CableLinksFile
 } from '@/schemas/cable-links'
+import {
+  TopologyLayoutFileSchema,
+  type TopologyLayoutFile
+} from '@/schemas/topology-layout'
 import { BreakoutPairsFileSchema, type BreakoutPair, type BreakoutPairsFile } from '@domain'
 
 export function librarySwitchesPath(workspacePath: string): string {
@@ -228,3 +232,52 @@ export async function deleteCableLinks(projectPath: string): Promise<void> {
 }
 
 export type { CableLink, CableLinksFile }
+
+// ────────────────────────────────────────────────────────────────────
+// Topology layout — per project node positions (Phase 7)
+// Lives at <project>/topology_layout.yaml. Absent = auto-layout
+// (elkjs); present with source: 'auto' = elkjs result was persisted;
+// present with source: 'user' = user has dragged at least one node.
+// ────────────────────────────────────────────────────────────────────
+
+export function topologyLayoutPath(projectPath: string): string {
+  return `${projectPath}/topology_layout.yaml`
+}
+
+export async function loadTopologyLayout(
+  projectPath: string
+): Promise<TopologyLayoutFile | null> {
+  const path = topologyLayoutPath(projectPath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return null
+  const raw = await window.dcn.readYaml(path)
+  const parsed = TopologyLayoutFileSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(
+      `topology_layout.yaml schema validation failed: ${parsed.error.message}`
+    )
+  }
+  return parsed.data
+}
+
+export async function saveTopologyLayout(
+  projectPath: string,
+  file: TopologyLayoutFile
+): Promise<void> {
+  const parsed = TopologyLayoutFileSchema.safeParse(file)
+  if (!parsed.success) {
+    throw new Error(
+      `topology_layout.yaml schema validation failed before save: ${parsed.error.message}`
+    )
+  }
+  await window.dcn.writeYaml(topologyLayoutPath(projectPath), parsed.data)
+}
+
+export async function deleteTopologyLayout(projectPath: string): Promise<void> {
+  const path = topologyLayoutPath(projectPath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return
+  await window.dcn.deleteFile(path)
+}
+
+export type { TopologyLayoutFile }

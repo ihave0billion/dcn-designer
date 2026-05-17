@@ -147,6 +147,9 @@ export function installMockDcn(): void {
   // Per-project cable_links.yaml content (Phase 6 — fabric uplink wiring).
   const cableLinksFiles = new Map<string, AnyRecord>()
 
+  // Per-project topology_layout.yaml content (Phase 7 — node positions).
+  const topologyLayoutFiles = new Map<string, AnyRecord>()
+
   // Generic plain-text files (Phase 6 — CSV export round-trip).
   const textFiles = new Map<string, string>()
 
@@ -240,6 +243,11 @@ export function installMockDcn(): void {
         if (cached) return structuredClone(cached) as T
         throw new Error(`[mock] no rack_mapping file at ${filePath}`)
       }
+      if (filePath.endsWith('topology_layout.yaml')) {
+        const cached = topologyLayoutFiles.get(filePath)
+        if (cached) return structuredClone(cached) as T
+        throw new Error(`[mock] no topology_layout file at ${filePath}`)
+      }
       if (filePath.includes('/library/optics/')) {
         const cached = opticsFiles.get(filePath)
         if (cached) return structuredClone(cached) as T
@@ -265,6 +273,8 @@ export function installMockDcn(): void {
         rackMappingFiles.set(filePath, structuredClone(data as AnyRecord))
       } else if (filePath.endsWith('cable_links.yaml')) {
         cableLinksFiles.set(filePath, structuredClone(data as AnyRecord))
+      } else if (filePath.endsWith('topology_layout.yaml')) {
+        topologyLayoutFiles.set(filePath, structuredClone(data as AnyRecord))
       }
     },
     fileExists: async (filePath: string) => {
@@ -277,12 +287,14 @@ export function installMockDcn(): void {
       if (filePath.endsWith('design.yaml')) return designFiles.has(filePath)
       if (filePath.endsWith('rack_mapping.yaml')) return rackMappingFiles.has(filePath)
       if (filePath.endsWith('cable_links.yaml')) return cableLinksFiles.has(filePath)
+      if (filePath.endsWith('topology_layout.yaml')) return topologyLayoutFiles.has(filePath)
       if (filePath.includes('/library/optics/')) return opticsFiles.has(filePath)
       return false
     },
     deleteFile: async (filePath: string) => {
       if (filePath.endsWith('rack_mapping.yaml')) rackMappingFiles.delete(filePath)
       else if (filePath.endsWith('cable_links.yaml')) cableLinksFiles.delete(filePath)
+      else if (filePath.endsWith('topology_layout.yaml')) topologyLayoutFiles.delete(filePath)
       else if (filePath.endsWith('design.yaml')) designFiles.delete(filePath)
       else if (filePath.endsWith('requirements.yaml')) requirementsFiles.delete(filePath)
       else if (filePath.includes('/library/optics/')) opticsFiles.delete(filePath)
