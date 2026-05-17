@@ -24,30 +24,119 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
-### 2026-05-13 — Solver-regen drift detection for forked rack layouts AND forked cable links (Phases 5 + 6 follow-up)
-- **Context:** Both Phase 5 (`rack_mapping.yaml`) and Phase 6 (`cable_links.yaml`)
-  implement auto-fork on first edit — the file becomes the source of truth, solver-regen
-  leaves it alone. When the user later changes requirements and re-Generates the design,
-  the new `design.yaml` may contain devices / ports the fork doesn't have (e.g. user added
-  a tier → 3 new leaves), or have lost devices/ports the fork still references. Today
-  both views show only what's in their fork; the user must click **Reset to solver
-  layout** to wholesale discard their edits and pick up the new devices. No "merge in
-  3 new devices" affordance exists for either file.
+### 2026-05-13 — Multi-Pod ACI: IPN router library source + curated model list (Phase 2b)
+- **Context:** Phase 2b will add multi-pod ACI to the solver — when ACI mode +
+  spine ports insufficient for the leaf count, the solver computes a candidate
+  matrix that includes a multi-pod option with **IPN routers** (Inter-Pod Network)
+  stitching pods together. IPN routers are L3 routers, not L2 switches, so they
+  don't fit cleanly into the current `switches.yaml` schema.
+- **What's needed:**
+  1. **Decision:** extend `switches.yaml` `role` enum to include `'ipn'` (one
+     library, one schema, one CRUD UI) vs. ship a separate `seed/ipn_routers.yaml`
+     (cleaner conceptual separation, but doubles the library plumbing). Recommend
+     extending `switches.yaml` — simpler. Confirm in Phase 2b interview.
+  2. **Curated list:** which Cisco models qualify as IPN routers? Typical
+     candidates from Cisco's DC reference designs:
+     - Nexus 9300 with appropriate licensing (Premier+ for ACI Multi-Pod)
+     - Nexus 9500 with the right line cards
+     - Possibly third-party (depends on customer cost constraints) — defer
+  3. **IPN-specific fields:** routing protocol support (BGP-EVPN, OSPF, PIM-SM
+     for BUM forwarding), MTU defaults (typically 9150 for ACI), licensing flags.
+- **Why open:** all decisions are Phase 2b scope; no implementation pressure
+  before then.
+- **Revisit:** Phase 2b interview, before any solver changes.
+
+### 2026-05-13 — Multi-Pod ACI: IPN port budget per spine model (Phase 2b)
+- **Context:** Each spine in a multi-pod design reserves some primary ports for
+  IPN uplinks (typically 4–8 per spine, per Cisco DC reference designs). The
+  exact number isn't a property of the spine model itself — it's a deployment
+  choice. But the solver needs a default per spine model to compute pod-level
+  spine port budgets correctly.
+- **What's likely needed:**
+  1. Add `ipn_uplink_ports_default: number` to `switches.yaml` for spine-role
+     entries (defaults to 4 if unset).
+  2. Or use a global solver constant like `DEFAULT_IPN_UPLINKS_PER_SPINE = 4`,
+     overridden per-design via a new `requirements.fabric.ipn_uplinks_per_spine`
+     field.
+- **Why open:** decide during Phase 2b interview.
+- **Revisit:** Phase 2b.
+
+### 2026-05-13 — Multi-pod commit-candidate: regenerate-aware editing extension (Phase 9b)
+- **Context:** Phase 2b will introduce `design.yaml.candidates[]` + a
+  `committed_candidate_id`. When the user flips the committed candidate from
+  e.g. `single_with_breakout` to `multi_no_breakout`, the active rack_layout
+  changes (multi-pod has more devices: extra spines + IPN routers + possibly
+  more racks). Existing fork files (`rack_mapping.yaml`, `cable_links.yaml`,
+  `topology_layout.yaml`) reference the OLD candidate's device set.
+- **What's needed:** the unified regenerate-aware editing pass (already on the
+  roadmap below) needs to handle "user committed a different candidate" as one
+  more trigger that may require fork-vs-design diff + merge. Same shape as
+  the requirements-changed trigger, just sourced differently.
+- **Why open:** Phase 9b scope; design depends on Phase 2b candidate model.
+- **Revisit:** as part of the unified regenerate-aware editing pass — fold into
+  whichever phase ships that.
+
+### 2026-05-13 — Solver-regen drift detection for forked rack layouts, cable links, AND topology layout (Phases 5 + 6 + 7 follow-up)
+- **Context:** Phase 5 (`rack_mapping.yaml`), Phase 6 (`cable_links.yaml`), and Phase 7
+  (`topology_layout.yaml`) all implement auto-fork on first edit — the file becomes the
+  source of truth, solver-regen leaves it alone. When the user later changes
+  requirements and re-Generates the design, the new `design.yaml` may contain devices
+  the forks don't have (e.g. user added a tier → 3 new leaves), or have lost devices
+  the forks still reference. Today all three views show only what's in their fork; the
+  user must click **Reset** to wholesale discard their edits and pick up the new
+  devices. Phase 7 partially mitigates the topology case via orphan-node synthesis (a
+  link to a missing device still renders, with a dashed border and "unknown" model),
+  but the user still has to manually fix it. No "merge in 3 new devices" affordance
+  exists for any of the three files.
 - **What's likely needed:** on mount, compute set differences between fork and current
   design output:
   - Rack View: `mapping.racks[*].devices[*].device_id` vs.
     `design.yaml.rack_layout[*].devices[*].device_id`
   - Links View: spines/leaves referenced in `cable_links.yaml.links[*].device_a/b.device_id`
     vs. the spines + leaves the new design produces
+  - Topology View: `topology_layout.yaml.positions[*].device_id` vs. the device set
+    extracted from rack_layout; orphan-node array already computed by
+    `extractTopology()` is the seed for this
   Surface a banner with the diff (e.g. "Solver has 3 new devices since you forked: leaf-7,
-  leaf-8, leaf-9. [Add them] [Reset to solver layout] [Dismiss]"). Add-them route drops
-  them into the rack/link slot the solver picked, but flags conflicts when start_u or
-  ports are taken.
+  leaf-8, leaf-9. [Add them] [Reset] [Dismiss]"). Add-them route drops them into the
+  rack/link/canvas slot the solver picked, but flags conflicts when start_u or ports are
+  taken.
 - **Why open:** real but not blocking — single-user workflow usually iterates one direction
-  (requirements → solver → racks/links → done). The drift case mostly bites when revisiting
-  an older project.
-- **Revisit:** after Phase 7 ships (Topology will hit the same shape); fold all three into
-  a unified "regenerate-aware editing" pass.
+  (requirements → solver → racks/links/topology → done). The drift case mostly bites when
+  revisiting an older project.
+- **Revisit:** Phase 10 (Polish) — fold all three into a unified "regenerate-aware
+  editing" pass.
+
+### 2026-05-13 — react-flow internal drag can't be driven by dispatched pointer events in browser-preview eval
+- **Context:** Phase 7 verification of node-drag persistence couldn't fully exercise
+  `onNodeDragStop` because react-flow uses an internal d3-drag implementation with
+  pointer-capture filters that ignore programmatically dispatched `PointerEvent`
+  sequences. Manual drag in a real browser works fine. Same shape as the Phase 6
+  Radix Select preview limitation.
+- **What's needed:** either accept that drag persistence is tested by direct file-write
+  round-trip + Electron manual sanity, OR add an in-page test harness that exposes
+  `persistPositions(nodes)` directly so end-to-end verification doesn't depend on
+  react-flow's drag internals.
+- **Why open:** the persistence helper round-trips cleanly (verified by writing a
+  topology_layout.yaml with `source: 'user'` and confirming the next mount picks up the
+  stored positions), the schema validates via zod, and the fork pattern is identical to
+  Phase 5/6 which had similar limits. Not worth a custom harness right now.
+- **Revisit:** Phase 10 if we add Playwright-driven smoke tests.
+
+### 2026-05-13 — Renderer bundle hit 5 MB after Phase 7 (elkjs + react-flow)
+- **Context:** Phase 7 added `@xyflow/react@12.10.2` + `elkjs@0.11.1`. Renderer bundle
+  jumped from 1.38 MB → 5.04 MB (+3.66 MB). elkjs alone is ~3 MB (includes its own
+  worker + the Eclipse layered layout algorithm). All other phases combined sit at
+  ~1.4 MB.
+- **What's likely needed:** lazy-load `TopologyView` via `React.lazy` so the elk +
+  react-flow chunk doesn't ship in the initial bundle (project view tabs are cheap
+  splits — most users open Requirements / Design before ever visiting Topology). Also
+  consider `manualChunks` in vite config to put elkjs in its own vendor chunk for
+  better caching.
+- **Why open:** Electron app, so no over-the-wire cost; first-paint is hot-reload-driven
+  in dev. Will bite at packaging time when Electron's installer balloons.
+- **Revisit:** Phase 9 (PDF export will pull `@react-pdf/renderer`, so the bundle audit
+  + chunk strategy makes sense to do once for both libraries) or Phase 10 polish.
 
 ### 2026-05-13 — New Link form Radix-Select dropdowns hard to drive via browser-preview eval
 - **Context:** Phase 6 verification of the New Link dialog couldn't fully exercise the
@@ -110,6 +199,21 @@ next time we hit a similar shape of problem.
 ---
 
 ## Resolved (recent)
+
+### 2026-05-13 — Rack defaults: 44U + top-of-rack switch placement (Phase 5b polish) → resolved
+Per user request after Phase 7 wrap-up. Schema `RackInventoryRow.size_u`
+default flipped from 42 → 44 (industry-standard data-center cabinet). Solver
+`pushDevice` in [src/domain/rack.ts](src/domain/rack.ts) flipped from bottom-up
+packing (`start_u = used_u + 1`) to top-down (`start_u = rack.size_u - used_u
+- d.ru + 1`) so spines + leaves auto-place at the top of the rack. RackView's
+`+ Add rack` inline default updated. AddDeviceDialog's Start U defaults to
+`rackSizeU` on open (top-of-rack), quantity stacks **downward** instead of
+upward, with two new bounds-validations and updated description copy.
+Existing project requirements + rack_mapping files keep their stored 42 unless
+the user edits — only new projects + new racks default to 44. Verified
+end-to-end (browser preview): 4-device 44U design produces placements at U44,
+U43, U42, U41; AddDeviceDialog adds 3× 1U leaves at U44/U43/U42 (downward
+stack); bounds error fires on Start U=2 + Quantity=5. 90/90 tests pass.
 
 ### 2026-05-13 — Patch-panel dropdown when breakout pairs have connector mismatch → resolved
 Shipped in Phase 6. `seed/patch_panels.yaml` carries 4 curated cassettes (Panduit/Corning

@@ -41,11 +41,16 @@ function pushDevice(
     const next_power_kw = (rack.estimated_power_w + d.power_w) / 1000
     if (next_power_kw > rack.pdu_kw_budget) return false
   }
+  // Top-of-rack pack: first switch lands at U(size_u), each subsequent
+  // device stacks below it. start_u is the device's bottom edge — for a
+  // 1U device at the top of a 44U rack, start_u = 44; for a 2U device
+  // at the top, start_u = 43 (occupies U43–U44).
+  const start_u = rack.size_u - used_u - d.ru + 1
   rack.devices.push({
     device_id: d.device_id,
     model_id: d.model_id,
     role: d.role,
-    start_u: used_u + 1, // 1-indexed
+    start_u,
     ru: d.ru,
     label: d.label
   })

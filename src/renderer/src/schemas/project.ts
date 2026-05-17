@@ -84,7 +84,7 @@ export type Constraints = z.infer<typeof ConstraintsSchema>
 
 export const RackInventoryRowSchema = z.object({
   name: z.string().min(1),
-  size_u: z.number().int().positive().default(42),
+  size_u: z.number().int().positive().default(44),
   pdu_kw_budget: z.number().positive().nullable().default(null),
   location: z.string().default(''),
   tags: z.array(z.string()).default([])

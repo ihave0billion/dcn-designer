@@ -54,7 +54,10 @@ export function AddDeviceDialog({
   const [blankRu, setBlankRu] = useState(1)
   const [errors, setErrors] = useState<string[]>([])
 
-  // Reset everything whenever the dialog opens
+  // Reset everything whenever the dialog opens. Default Start U to the
+  // top of the rack — typical DC layout puts switches at the top
+  // (Phase 5b polish). Assumes a 1U device; user adjusts manually for
+  // multi-U gear via the Start U input.
   useEffect(() => {
     if (!open) return
     setTab('switch')
@@ -62,11 +65,11 @@ export function AddDeviceDialog({
     setSelectedSwitchId(null)
     setSelectedServerId(null)
     setLabel('')
-    setStartU(1)
+    setStartU(rackSizeU)
     setQuantity(1)
     setBlankRu(1)
     setErrors([])
-  }, [open])
+  }, [open, rackSizeU])
 
   // ── Filter the library lists by free-text ───────────────────────────
   const filteredSwitches = useMemo(() => {
@@ -141,7 +144,25 @@ export function AddDeviceDialog({
       return
     }
 
-    // Generate unique device_ids by walking the existing set
+    // Top device must fit in-rack
+    if (startU + ru - 1 > rackSizeU) {
+      issues.push(`A ${ru}U device at Start U ${startU} would extend past U${rackSizeU}.`)
+    }
+    // Stack downward from Start U — the bottom device lands at start_u - (qty-1)*ru
+    if (startU - (quantity - 1) * ru < 1) {
+      issues.push(
+        `Stacking ${quantity}× ${ru}U devices downward from U${startU} would extend below U1.`
+      )
+    }
+
+    if (issues.length > 0) {
+      setErrors(issues)
+      return
+    }
+
+    // Generate unique device_ids by walking the existing set. Devices
+    // stack DOWNWARD from Start U (top-of-rack default per Phase 5b polish):
+    // first device at start_u, next at start_u - ru, etc.
     const used = new Set(existingDeviceIds)
     const next: RackMappingDevice[] = []
     let cursor = startU
@@ -158,7 +179,7 @@ export function AddDeviceDialog({
         ru,
         label: quantity > 1 ? `${labelPrefix} #${i + 1}` : labelPrefix
       })
-      cursor += ru
+      cursor -= ru
       nextSerial += 1
     }
     onAdd(next)
@@ -171,7 +192,8 @@ export function AddDeviceDialog({
         <DialogHeader>
           <DialogTitle>Add device to {rackName}</DialogTitle>
           <DialogDescription>
-            Pick a library device or insert a blank panel. Quantity stacks devices upward from Start U.
+            Pick a library device or insert a blank panel. Start U defaults to the top of the
+            rack; quantity stacks devices downward from there.
           </DialogDescription>
         </DialogHeader>
 

@@ -293,7 +293,7 @@ export function RackView({
         ...requirements.racks,
         {
           name,
-          size_u: 42,
+          size_u: 44,
           pdu_kw_budget: null,
           location: '',
           tags: []
