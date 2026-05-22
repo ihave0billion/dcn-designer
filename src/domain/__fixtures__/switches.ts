@@ -1,4 +1,4 @@
-import type { BreakoutPair, SwitchSpec } from '../types'
+import type { BreakoutPair, IpnRouterSpec, SwitchSpec } from '../types'
 
 // Minimal switch fixtures used across the domain tests. Each entry
 // mirrors the relevant slice of seed/switches.yaml — kept inline so
@@ -73,6 +73,18 @@ export const ALL_SWITCHES: SwitchSpec[] = [
   SYN_SECONDARY_FASTER,
   SYN_LEAF_NO_ROCEV2
 ]
+
+// Phase 2b — IPN router fixture, mirroring seed/ipn_routers.yaml.
+// N9K-C9332D-GX2B is 32× 400G — ample for typical multi-pod fabrics.
+export const N9K_C9332D_GX2B_IPN: IpnRouterSpec = {
+  id: 'N9K-C9332D-GX2B',
+  primary: { ports: 32, speed_g: 400 },
+  ru: 1,
+  power_w: 900,
+  capabilities: { multipod: true, multisite: true, mpls_handoff: false }
+}
+
+export const ALL_IPN_ROUTERS: IpnRouterSpec[] = [N9K_C9332D_GX2B_IPN]
 
 export const BREAKOUT_PAIRS: BreakoutPair[] = [
   {

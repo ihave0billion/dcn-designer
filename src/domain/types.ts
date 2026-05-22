@@ -33,6 +33,52 @@ export interface ServerSpec {
   power_w: number | null
 }
 
+// IPN router — Phase 2b. Lives in its own library file (decision
+// 2026-05-18) so SwitchSpec stays focused on leaf/spine concerns and
+// IPN-specific fields (multipod, multisite, MPLS handoff) don't have
+// to be optional on every switch.
+export interface IpnRouterCapabilitiesSpec {
+  multipod: boolean
+  multisite?: boolean
+  mpls_handoff?: boolean
+}
+
+export interface IpnRouterSpec {
+  id: string
+  primary: PortGroupSpec
+  ru: number | null
+  power_w: number | null
+  capabilities: IpnRouterCapabilitiesSpec
+}
+
+export const IpnRouterSchema = z.object({
+  id: z.string().min(1),
+  model_display: z.string().min(1).optional(),
+  vendor: z.string().min(1).optional(),
+  primary: z.object({
+    ports: z.number().int().positive(),
+    speed_g: z.number().positive(),
+    speed_options_g: z.array(z.number().positive()).optional(),
+    naming_template: z.string().optional()
+  }),
+  ru: z.number().nullable(),
+  power_w: z.number().nullable(),
+  capabilities: z.object({
+    multipod: z.boolean(),
+    multisite: z.boolean().optional(),
+    mpls_handoff: z.boolean().optional()
+  }),
+  availability: z.string().optional(),
+  notes: z.string().optional()
+})
+export type IpnRouterFileEntry = z.infer<typeof IpnRouterSchema>
+
+export const IpnRoutersFileSchema = z.object({
+  schema_version: z.literal(1),
+  ipn_routers: z.array(IpnRouterSchema)
+})
+export type IpnRoutersFile = z.infer<typeof IpnRoutersFileSchema>
+
 // ────────────────────────────────────────────────────────────────────
 // Breakout pairs (loaded from seed/breakout_pairs.yaml or workspace)
 // ────────────────────────────────────────────────────────────────────
@@ -79,6 +125,13 @@ export interface FabricRequest {
   spine_model_id: string | null
   use_case: UseCase
   input_mode: InputMode
+  // Phase 2b — ACI Multi-Pod controls.
+  // `aci_multipod_allowed` defaults to true (decision 2026-05-18): the
+  // candidate matrix is always computed so the user can discover the
+  // option. Setting false blocks multi-pod candidates with
+  // MULTIPOD_LICENSE_BLOCKED. UI toggle ships in Phase 9b.
+  aci_multipod_allowed?: boolean
+  ipn_router_model_id?: string | null
 }
 
 export interface RackInventoryEntry {
@@ -97,6 +150,7 @@ export interface SolverContext {
   switches: SwitchSpec[]
   servers?: ServerSpec[]
   breakout_pairs: BreakoutPair[]
+  ipn_routers?: IpnRouterSpec[]
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -193,6 +247,12 @@ export type WarningCode =
   | 'UNKNOWN_LEAF_MODEL'
   | 'UNKNOWN_SPINE_MODEL'
   | 'NO_SPINE_MODEL_SELECTED'
+  // Phase 2b — Multi-Pod ACI
+  | 'MULTIPOD_REQUIRED'
+  | 'MULTIPOD_RECOMMENDED'
+  | 'MULTIPOD_LICENSE_BLOCKED'
+  | 'IPN_PORTS_INSUFFICIENT'
+  | 'IPN_MODEL_NOT_SELECTED'
 
 export interface SolverWarning {
   code: WarningCode
@@ -215,6 +275,66 @@ export interface DesignSummary {
   breakout_required_to_be_valid: boolean
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Phase 2b — Multi-Pod candidate matrix
+//
+// The solver computes four candidates in parallel along two axes:
+//   pod_variant     : 'single' | 'multi'
+//   breakout_variant: 'no_breakout' | 'with_breakout'
+//
+// Each candidate carries its own SpineResult, RackPlacement, optics
+// BOM, and warnings — independent design verdicts. The primary
+// candidate (auto-promoted as "simplest valid") is published at the
+// top level for backward compatibility with Phase 2 readers; the full
+// matrix is available in `candidates[]` for the Phase 9b UI.
+// ────────────────────────────────────────────────────────────────────
+
+export type PodVariant = 'single' | 'multi'
+export type BreakoutVariant = 'no_breakout' | 'with_breakout'
+
+// Stable IDs — Phase 9b UI keys candidate cards/buttons off these.
+export type CandidateId =
+  | 'single_no_breakout'
+  | 'single_with_breakout'
+  | 'multi_no_breakout'
+  | 'multi_with_breakout'
+
+export interface MultiPodAnalysis {
+  pods_needed: number
+  leaves_per_pod: number[] // index = pod_index; sum == total_leaves
+  spines_per_pod: number // each pod gets identical spine count (HA mirrored)
+  ipn_routers_needed: number // HA floor of 2; grows if IPN port budget runs out
+  ipn_router_model_id: string | null
+  ports_per_spine_per_ipn: number // global constant (4) — exposed for UI clarity
+  spine_to_ipn_links: number // total cable count: spines × ipn × ports
+  effective_spine_ports: number // spine_ports - (ipn × ports_per_spine_per_ipn)
+}
+
+export interface DesignCandidate {
+  id: CandidateId
+  pod_variant: PodVariant
+  breakout_variant: BreakoutVariant
+  valid: boolean
+  // The five fields below mirror Phase 2's per-design output — each
+  // candidate runs the same computeSpine + breakout pass internally so
+  // each carries its own verdict.
+  spine: SpineResult | null
+  breakout: BreakoutAnalysis | null
+  multipod: MultiPodAnalysis | null // null on single-pod candidates
+  rack_layout: RackPlacement[]
+  optics_bom: OpticsBomEntry[]
+  warnings: SolverWarning[]
+  // Per-candidate totals (mostly mirror DesignSummary fields but
+  // scoped to this candidate — the top-level summary still reflects
+  // the canonical single-pod-no-breakout view for Phase 2 readers).
+  total_spines: number
+  total_ipn_routers: number
+  total_host_bw_g: number
+  total_uplink_bw_g: number
+  computed_oversub_ratio: number
+  computed_oversub_label: string
+}
+
 export interface DesignResult {
   schema_version: 1
   summary: DesignSummary
@@ -224,4 +344,14 @@ export interface DesignResult {
   optics_bom: OpticsBomEntry[]
   rack_layout: RackPlacement[]
   warnings: SolverWarning[]
+  // Phase 2b — full candidate matrix and the auto-promoted choice.
+  // `candidates` always has 4 entries (one per CandidateId). `primary`
+  // is the simplest valid one (fewer pods first, then no-breakout if
+  // tied) or, when nothing is valid, the canonical single_no_breakout
+  // so consumers always have something to render. `committed` mirrors
+  // `primary` until the Phase 9b UI exposes the "commit this candidate"
+  // toggle.
+  candidates: DesignCandidate[]
+  primary_candidate_id: CandidateId
+  committed_candidate_id: CandidateId
 }

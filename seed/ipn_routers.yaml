@@ -1,0 +1,46 @@
+# DCN Designer — IPN routers library seed
+#
+# IPN (Inter-Pod Network) routers connect spine layers across multiple
+# ACI pods in a Multi-Pod fabric. Each spine in each pod reserves a
+# small number of ports (Cisco reference: 4 ports per spine per IPN) to
+# carry intra-fabric VXLAN encapsulation between pods.
+#
+# Source: derived from N9K.md plus the v8 hardware reference. For
+# Phase 2b, only the Nexus 9332D-GX2B is seeded (32× 400G — ample
+# port budget for typical 2-pod fabrics). Add more models via the
+# Library UI in Phase 9b.
+#
+# Fields:
+#   id            : Cisco product ID
+#   model_display : human-readable name shown in dropdowns
+#   vendor        : "Cisco" (or "Third-party" — not yet seeded)
+#   primary       : the port group used to terminate spine-IPN cables
+#   ru            : rack units (null when not specified)
+#   power_w       : nameplate / typical power draw in W (null when not specified)
+#   capabilities  : flat boolean record — only flags relevant to IPN role
+#   availability  : available | future | eos
+#   notes         : free-text (typical role-specific guidance)
+
+schema_version: 1
+ipn_routers:
+
+  - id: N9K-C9332D-GX2B
+    model_display: Nexus 9332D-GX2B
+    vendor: Cisco
+    primary:
+      ports: 32
+      speed_g: 400
+      speed_options_g: [400]
+      naming_template: "Eth1/{1..32}"
+    ru: null
+    power_w: null
+    capabilities:
+      multipod: true
+      multisite: true
+      mpls_handoff: false
+    availability: available
+    notes: >-
+      Same hardware as the GX2B in seed/switches.yaml, but listed here
+      as an IPN role to keep library concerns separate. 32× 400G ports
+      cover typical 2–4 pod fabrics with the default 4-ports-per-spine
+      reservation.

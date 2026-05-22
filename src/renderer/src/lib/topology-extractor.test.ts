@@ -106,7 +106,13 @@ function makeDesign(opts: {
           }
         ]
       : [],
-    warnings: []
+    warnings: [],
+    // Phase 2b — topology extraction reads only the canonical
+    // top-level fields, so an empty candidate matrix is sufficient
+    // mock state.
+    candidates: [],
+    primary_candidate_id: 'single_no_breakout',
+    committed_candidate_id: 'single_no_breakout'
   }
 }
 

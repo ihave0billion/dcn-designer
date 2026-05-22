@@ -195,7 +195,13 @@ function makeDesign(opts: {
       : null,
     optics_bom: [],
     rack_layout,
-    warnings: []
+    warnings: [],
+    // Phase 2b — candidate matrix isn't exercised by the cable-links
+    // seeder, so an empty array + canonical primary id are sufficient
+    // mock state.
+    candidates: [],
+    primary_candidate_id: 'single_no_breakout',
+    committed_candidate_id: 'single_no_breakout'
   }
 }
 

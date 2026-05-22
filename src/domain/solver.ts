@@ -2,6 +2,8 @@ import { computeTier } from './tier'
 import { computeSpine } from './spine'
 import { checkUseCaseConstraints } from './use-case'
 import { placeRacks } from './rack'
+import { buildCandidates } from './multipod'
+import { pickIpnRouter } from './ipn'
 import type {
   DesignResult,
   DesignSummary,
@@ -170,6 +172,27 @@ export function solve(
     breakout_required_to_be_valid
   }
 
+  // ──────────────────────────────────────────────────────────────────
+  // Phase 2b — 4-way candidate matrix (single/multi × no/with breakout)
+  //
+  // The top-level `summary`, `spine`, `breakout`, `rack_layout`,
+  // `optics_bom`, and `warnings` continue to represent the canonical
+  // single-pod-no-breakout view — Phase 2 readers keep working. The
+  // candidate matrix is published as a parallel array; Phase 9b UI
+  // renders comparison cards from it.
+  // ──────────────────────────────────────────────────────────────────
+  const ipn_router = pickIpnRouter(context.ipn_routers, requirements.fabric.ipn_router_model_id)
+  const candidatesOut = buildCandidates({
+    tiers: tierResults,
+    spine_switch: spineSw,
+    ipn_router,
+    fabric: requirements.fabric,
+    breakout_pairs: context.breakout_pairs,
+    switches: context.switches,
+    rack_inventory: requirements.racks ?? []
+  })
+  warnings.push(...candidatesOut.fabric_warnings)
+
   return {
     schema_version: 1,
     summary,
@@ -183,7 +206,10 @@ export function solve(
       requirements.fabric.uplinks_per_leaf
     ),
     rack_layout: rackResult.layout,
-    warnings
+    warnings,
+    candidates: candidatesOut.candidates,
+    primary_candidate_id: candidatesOut.primary_candidate_id,
+    committed_candidate_id: candidatesOut.primary_candidate_id
   }
 }
 

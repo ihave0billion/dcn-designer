@@ -9,19 +9,38 @@ export {
   requiresNonBlocking
 } from './use-case'
 export {
+  buildCandidates,
+  distributeEvenly,
+  pickPrimaryCandidate,
+  IPN_PORTS_PER_SPINE_PER_IPN,
+  IPN_HA_MIN
+} from './multipod'
+export { ipnRouterSpecFromFileEntry, pickIpnRouter } from './ipn'
+export {
   BreakoutPairSchema,
-  BreakoutPairsFileSchema
+  BreakoutPairsFileSchema,
+  IpnRouterSchema,
+  IpnRoutersFileSchema
 } from './types'
 export type {
   BreakoutAnalysis,
   BreakoutPair,
   BreakoutPairsFile,
+  BreakoutVariant,
+  CandidateId,
+  DesignCandidate,
   DesignResult,
   DesignSummary,
   FabricRequest,
   InputMode,
+  IpnRouterCapabilitiesSpec,
+  IpnRouterFileEntry,
+  IpnRoutersFile,
+  IpnRouterSpec,
+  MultiPodAnalysis,
   OpticsBomEntry,
   OpticsBomScenario,
+  PodVariant,
   PortGroupSpec,
   RackDevicePlacement,
   RackInventoryEntry,
