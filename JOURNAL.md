@@ -24,28 +24,6 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
-### 2026-05-13 — Multi-Pod ACI: IPN router library source + curated model list (Phase 2b)
-- **Context:** Phase 2b will add multi-pod ACI to the solver — when ACI mode +
-  spine ports insufficient for the leaf count, the solver computes a candidate
-  matrix that includes a multi-pod option with **IPN routers** (Inter-Pod Network)
-  stitching pods together. IPN routers are L3 routers, not L2 switches, so they
-  don't fit cleanly into the current `switches.yaml` schema.
-- **What's needed:**
-  1. **Decision:** extend `switches.yaml` `role` enum to include `'ipn'` (one
-     library, one schema, one CRUD UI) vs. ship a separate `seed/ipn_routers.yaml`
-     (cleaner conceptual separation, but doubles the library plumbing). Recommend
-     extending `switches.yaml` — simpler. Confirm in Phase 2b interview.
-  2. **Curated list:** which Cisco models qualify as IPN routers? Typical
-     candidates from Cisco's DC reference designs:
-     - Nexus 9300 with appropriate licensing (Premier+ for ACI Multi-Pod)
-     - Nexus 9500 with the right line cards
-     - Possibly third-party (depends on customer cost constraints) — defer
-  3. **IPN-specific fields:** routing protocol support (BGP-EVPN, OSPF, PIM-SM
-     for BUM forwarding), MTU defaults (typically 9150 for ACI), licensing flags.
-- **Why open:** all decisions are Phase 2b scope; no implementation pressure
-  before then.
-- **Revisit:** Phase 2b interview, before any solver changes.
-
 ### 2026-05-13 — Multi-Pod ACI: IPN port budget per spine model (Phase 2b)
 - **Context:** Each spine in a multi-pod design reserves some primary ports for
   IPN uplinks (typically 4–8 per spine, per Cisco DC reference designs). The
@@ -72,6 +50,12 @@ next time we hit a similar shape of problem.
   roadmap below) needs to handle "user committed a different candidate" as one
   more trigger that may require fork-vs-design diff + merge. Same shape as
   the requirements-changed trigger, just sourced differently.
+- **Behavior decided (2026-06-01):** on commit-switch, **warn + let the user
+  choose** — show what would be orphaned (devices gone) vs missing (new IPNs
+  with no rack/links), then offer "Regenerate fresh" vs "Keep my edits".
+  Non-destructive default; never silently discard hand-edits. (PROJECT_PLAN Open
+  Risk #9 + 2026-06-01 session log row.) The *behavior* is settled; the
+  *implementation* stays open and folds into the unified pass below.
 - **Why open:** Phase 9b scope; design depends on Phase 2b candidate model.
 - **Revisit:** as part of the unified regenerate-aware editing pass — fold into
   whichever phase ships that.
@@ -199,6 +183,19 @@ next time we hit a similar shape of problem.
 ---
 
 ## Resolved (recent)
+
+### 2026-06-01 — Multi-Pod ACI: IPN router library source + curated model list (Phase 2b) → resolved
+Ship a **separate `seed/ipn_routers.yaml`** (not a `switches.yaml` `role: 'ipn'`
+enum) — Phase 2b had already created the file with one seed model; the library
+source is now confirmed and the file populated with the eight `role: both`
+models from the 100G + 400G categories of `switches.yaml` (100G: 9364C-H1,
+93600CD-GX, 9336C-SE1; 400G: 9364D-GX2A, 9348D-GX2A, 9332D-GX2B, 9332D-H2R,
+9316D-GX), each duplicated under the IPN role with `capabilities.multipod`. The
+9336C-SE1 is included despite lacking ACI-spine capability — an IPN runs NX-OS,
+so ACI capability is not required of the IPN itself. IPN-specific routing/MTU
+fields were NOT added; the slim `IpnRouterSchema` (id, primary, ru, power_w,
+capabilities) is sufficient for the solver. Curated-model expansion happens via
+the Library UI in Phase 9b. (PROJECT_PLAN Open Risk #8 + 2026-06-01 session log.)
 
 ### 2026-05-13 — Rack defaults: 44U + top-of-rack switch placement (Phase 5b polish) → resolved
 Per user request after Phase 7 wrap-up. Schema `RackInventoryRow.size_u`
