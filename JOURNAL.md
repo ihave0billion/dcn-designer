@@ -24,6 +24,30 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-06-03 — ensureWorkspace not re-run on app launch → silent empty library
+- **Symptom (hit live during user testing):** opening the app with a workspace
+  path already in `localStorage` whose `library/` is missing or incomplete leaves
+  **every model dropdown empty** (leaf, spine, IPN) with no error or prompt — the
+  user just sees nothing to pick. Surfaced after a throwaway workspace's `library/`
+  was deleted out from under a remembered path; the relaunch recreated only
+  `projects/` (via `listProjects`/`createProject`) and never re-copied the seeds.
+- **Root cause:** `window.dcn.ensureWorkspace` (which creates `library/` + copies
+  `seed/*.yaml`) is only called from `WorkspaceContext.setWorkspacePath` — i.e.
+  **only when the user picks a folder**, not when the app boots with a remembered
+  `dcn-designer.workspace_path`. `loadSwitchesFile` then throws on the missing file
+  and the caller swallows it to `[]`.
+- **Fix (recommended):** call `ensureWorkspace` whenever a workspace is *loaded*
+  (on mount in `WorkspaceContext` when `workspacePath` is read from storage), not
+  only on pick. Cheap + idempotent (`copyIfMissing`). Optionally surface a toast
+  listing what was re-seeded. Also consider a "library is empty — re-seed?" banner
+  in the Requirements/Library views as a backstop.
+- **Note:** also confirmed the leaf-model dropdown is **per-tier** — it only
+  renders inside a Tiers table row, so a project with no tiers shows no leaf picker
+  at all (the lone `(none)` combobox in that state is the Fabric **spine** selector,
+  which correctly lists spine-capable models). Not a bug, but a UX gotcha worth a
+  hint ("Add a tier to choose a leaf model").
+- **Revisit:** Phase 10 polish (or sooner — it's a small, high-value hardening).
+
 ### 2026-06-03 — Phase 9b Multi-Pod UI shipped without browser/GUI verification
 - **Context:** Phase 9b (candidate cards + commit toggle, IPN nodes + pod
   boundaries on Topology, IPN rack on Rack View, spine↔IPN seeding on Links,
@@ -450,6 +474,29 @@ earlier interim commit was dropped before the recommit.
 ---
 
 ## Lessons / patterns
+
+### 2026-06-03 — Headless GUI verification + interactive viewing on this VM
+The long-standing "no way to see/drive the GUI on this headless VM" blocker is
+solved. Two complementary paths:
+
+- **Automated (screenshot + drive), no display needed:** launch Electron with a
+  dev-gated CDP port — `DCN_CDP_PORT=9222 ELECTRON_DISABLE_SANDBOX=1 xvfb-run -a
+  npm run dev` (the `DCN_CDP_PORT` switch is wired in `src/main/index.ts`, inert
+  unless set). Then a **zero-dependency Node harness** (Node 22's built-in
+  `WebSocket`, no `ws`/Playwright) connects to `ws://127.0.0.1:9222`, and uses
+  `Page.captureScreenshot` (PNG, readable directly) + `Input.dispatchMouseEvent`
+  for clicks. Gotchas learned: **Radix UI (Tabs, Select) needs real
+  `Input.dispatchMouseEvent` press+release at the element center** — DOM
+  `.click()` doesn't trigger them; capturePage returns the logical page size even
+  when the OS window is tiny/unmanaged; skip the native workspace-picker by
+  setting `localStorage['dcn-designer.workspace_path']` + calling
+  `window.dcn.ensureWorkspace(path)` via `Runtime.evaluate`, then reload.
+- **Interactive (user watches/clicks via VNC):** the VM's X displays map to the
+  user's remote clients — **`:0` = Mac TigerVNC** (user `user`, seat0, runs
+  xfwm4), **`:10` = iPad Jump Desktop** (user `ipad`). Launch the app onto the
+  user's display with `DISPLAY=:0 ELECTRON_DISABLE_SANDBOX=1 npm run dev` and the
+  decorated 1280×800 window appears in their TigerVNC session — no xvfb. Add
+  `DCN_CDP_PORT=9222` too so I can screenshot/assist what's on their screen.
 
 ### 2026-05-12 — Browser-mode dev mock pattern (for Electron apps)
 For Electron apps where the renderer depends on preload-injected APIs (`window.dcn`,
