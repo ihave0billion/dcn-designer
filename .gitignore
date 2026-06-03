@@ -32,3 +32,6 @@ Deliverables/
 
 # Claude Code local-only settings
 .claude/settings.local.json
+
+# Local-only agent/session guidance (keep off GitHub)
+AGENTS.md
