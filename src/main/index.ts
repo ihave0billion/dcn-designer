@@ -5,6 +5,13 @@ import { homedir } from 'node:os'
 import { existsSync, promises as fs } from 'node:fs'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
+// Linux/VM: Chromium's sandbox relies on unprivileged user namespaces, which
+// AppArmor blocks by default on Ubuntu 24.04+. Opt out for headless dev/test
+// runs by setting ELECTRON_DISABLE_SANDBOX=1 (see the `:linux` npm scripts).
+if (process.platform === 'linux' && process.env.ELECTRON_DISABLE_SANDBOX === '1') {
+  app.commandLine.appendSwitch('no-sandbox')
+}
+
 function defaultWorkspacePath(): string {
   return join(homedir(), 'DCN-Designer')
 }

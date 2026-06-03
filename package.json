@@ -7,8 +7,10 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:linux": "ELECTRON_DISABLE_SANDBOX=1 xvfb-run -a electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "preview:linux": "ELECTRON_DISABLE_SANDBOX=1 xvfb-run -a electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
