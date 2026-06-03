@@ -1,7 +1,7 @@
 export { solve } from './solver'
 export { computeTier, pickUplinkGroup } from './tier'
 export { computeSpine } from './spine'
-export { placeRacks } from './rack'
+export { placeRacks, synthesizeLogicalLayout, LOGICAL_FABRIC_RACK_NAME } from './rack'
 export {
   checkUseCaseConstraints,
   candidateLeavesFor,

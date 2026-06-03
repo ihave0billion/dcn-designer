@@ -182,6 +182,50 @@ export function installMockDcn(): void {
     ]
   }
 
+  // ipn_routers.yaml mirror — seeded into every mock workspace so the
+  // Requirements IPN-router picker is populated and the multi-pod solver
+  // can pick a router in browser preview (Phase 9b). Mirrors a subset of
+  // seed/ipn_routers.yaml; the two 400G entries match the mock switches
+  // above so committed multi-pod designs reference familiar models.
+  const ipnRouters = {
+    schema_version: 1,
+    ipn_routers: [
+      {
+        id: 'N9K-C9364D-GX2A',
+        model_display: 'Nexus 9364D-GX2A',
+        vendor: 'Cisco',
+        primary: { ports: 64, speed_g: 400, speed_options_g: [400], naming_template: 'Eth1/{1..64}' },
+        ru: null,
+        power_w: null,
+        capabilities: { multipod: true, multisite: true, mpls_handoff: false },
+        availability: 'available',
+        notes: 'Mirrors N9K-C9364D-GX2A — 64× 400G high-density IPN for 400G-spine fabrics.'
+      },
+      {
+        id: 'N9K-C9332D-H2R',
+        model_display: 'Nexus 9332D-H2R',
+        vendor: 'Cisco',
+        primary: { ports: 32, speed_g: 400, speed_options_g: [400], naming_template: 'Eth1/{1..32}' },
+        ru: null,
+        power_w: null,
+        capabilities: { multipod: true, multisite: true, mpls_handoff: false },
+        availability: 'available',
+        notes: 'Mirrors N9K-C9332D-H2R — 32× 400G deep-buffer IPN.'
+      },
+      {
+        id: 'N9K-C9364C-H1',
+        model_display: 'Nexus 9364C-H1',
+        vendor: 'Cisco',
+        primary: { ports: 64, speed_g: 100, speed_options_g: [100], naming_template: 'Eth1/{1..64}' },
+        ru: null,
+        power_w: null,
+        capabilities: { multipod: true, multisite: true, mpls_handoff: false },
+        availability: 'available',
+        notes: 'Mirrors N9K-C9364C-H1 — 64× 100G IPN for 100G-spine fabrics.'
+      }
+    ]
+  }
+
   // breakout_pairs.yaml mirror — seeded into every mock workspace.
   // Same two verified pairs as `seed/breakout_pairs.yaml` so the solver
   // matches verified-pair lookups in browser preview.
@@ -221,6 +265,7 @@ export function installMockDcn(): void {
       if (filePath.endsWith('switches.yaml')) return { schema_version: 1, switches: structuredClone(switches) } as T
       if (filePath.endsWith('servers.yaml')) return { schema_version: 1, servers: structuredClone(servers) } as T
       if (filePath.endsWith('breakout_pairs.yaml')) return structuredClone(breakoutPairs) as T
+      if (filePath.endsWith('ipn_routers.yaml')) return structuredClone(ipnRouters) as T
       if (filePath.endsWith('patch_panels.yaml')) return structuredClone(patchPanels) as T
       if (filePath.endsWith('cable_links.yaml')) {
         const cached = cableLinksFiles.get(filePath)
@@ -282,6 +327,7 @@ export function installMockDcn(): void {
       if (filePath.endsWith('switches.yaml')) return true
       if (filePath.endsWith('servers.yaml')) return true
       if (filePath.endsWith('breakout_pairs.yaml')) return true
+      if (filePath.endsWith('ipn_routers.yaml')) return true
       if (filePath.endsWith('patch_panels.yaml')) return true
       if (filePath.endsWith('requirements.yaml')) return requirementsFiles.has(filePath)
       if (filePath.endsWith('design.yaml')) return designFiles.has(filePath)

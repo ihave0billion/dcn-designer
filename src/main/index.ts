@@ -12,6 +12,14 @@ if (process.platform === 'linux' && process.env.ELECTRON_DISABLE_SANDBOX === '1'
   app.commandLine.appendSwitch('no-sandbox')
 }
 
+// Dev/test only: expose the Chrome DevTools Protocol on a TCP port so a headless
+// harness can screenshot + drive the renderer (e.g. Phase 9b GUI verification on
+// a display-less VM). Inert unless DCN_CDP_PORT is set; never set in production.
+if (process.env.DCN_CDP_PORT) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.DCN_CDP_PORT)
+  app.commandLine.appendSwitch('remote-allow-origins', '*')
+}
+
 function defaultWorkspacePath(): string {
   return join(homedir(), 'DCN-Designer')
 }

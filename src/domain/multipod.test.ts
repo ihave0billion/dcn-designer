@@ -5,6 +5,7 @@ import {
   distributeEvenly,
   IPN_HA_MIN,
   IPN_PORTS_PER_SPINE_PER_IPN,
+  IPN_RACK_NAME,
   pickPrimaryCandidate
 } from './multipod'
 import {
@@ -164,6 +165,40 @@ describe('111-leaf Multi-Pod acceptance scenario', () => {
       const errors = c.warnings.filter((w) => w.severity === 'error')
       expect(errors.length).toBeGreaterThan(0)
     }
+  })
+
+  // Regression (2026-06-03 GUI verification): with NO rack inventory the
+  // multi-pod candidate must still expose its full device set in
+  // rack_layout — every spine, every leaf, both IPN routers, pod-tagged —
+  // so the Topology graph and cable-links seeder render the committed
+  // candidate instead of falling back to a flat 2-spine fabric. (These
+  // requirements carry no `racks`, so placeRacks returns []; the candidate
+  // synthesizes a logical layout.)
+  it('multi_no_breakout populates rack_layout from synthesized devices (no inventory)', () => {
+    const c = getCandidate(candidates, 'multi_no_breakout')
+    const allDevices = c.rack_layout.flatMap((r) => r.devices)
+    const spines = allDevices.filter((d) => d.role === 'spine')
+    const leaves = allDevices.filter((d) => d.role === 'leaf')
+    const ipns = allDevices.filter((d) => d.role === 'ipn')
+
+    expect(spines).toHaveLength(8) // total_spines, not spines_per_pod (2)
+    expect(leaves).toHaveLength(111)
+    expect(ipns).toHaveLength(2)
+
+    // A dedicated IPN rack is appended.
+    expect(c.rack_layout.some((r) => r.rack_name === IPN_RACK_NAME)).toBe(true)
+
+    // Spines are pod-tagged by spines_per_pod (2): spine-1/2→pod0 … spine-7/8→pod3.
+    const spineById = new Map(spines.map((d) => [d.device_id, d.pod_index]))
+    expect(spineById.get('spine-1')).toBe(0)
+    expect(spineById.get('spine-8')).toBe(3)
+    // Leaves are pod-tagged by the leaves_per_pod split [28,28,28,27].
+    const leafById = new Map(leaves.map((d) => [d.device_id, d.pod_index]))
+    expect(leafById.get('leaf-1')).toBe(0)
+    expect(leafById.get('leaf-29')).toBe(1)
+    expect(leafById.get('leaf-111')).toBe(3)
+    // IPN routers are shared across pods → pod_index null.
+    expect(ipns.every((d) => d.pod_index == null)).toBe(true)
   })
 })
 

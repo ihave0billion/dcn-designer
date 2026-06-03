@@ -66,6 +66,79 @@ export interface RackPlacementResult {
   warnings: SolverWarning[]
 }
 
+// Name of the single logical rack synthesized when no physical rack
+// inventory exists but downstream views still need the device set.
+export const LOGICAL_FABRIC_RACK_NAME = 'Fabric (unracked)'
+
+// Build a device-bearing layout WITHOUT physical-rack constraints, for
+// when the user hasn't defined rack inventory yet. Unlike placeRacks
+// (which returns [] for empty inventory), this emits every spine + leaf
+// as a logical device so consumers that read rack_layout — the Topology
+// graph and the cable-links seeder — see the full fabric (Phase 9b: this
+// is what lets a committed multi-pod design render its real spine count,
+// pods, and IPN routers before any rack is defined). Device ids follow
+// the same `spine-N` / `leaf-N` scheme as placeRacks so pod annotation
+// and seeding line up. start_u is cosmetic (stacked top-down); no U or
+// PDU limit is enforced because these devices aren't in a real cabinet.
+export function synthesizeLogicalLayout(
+  spine: SpineResult | null,
+  tiers: TierResult[],
+  switches: SwitchSpec[]
+): RackPlacement[] {
+  const devices: RackPlacement['devices'] = []
+  let cursor_u = 0
+  const push = (d: { device_id: string; model_id: string; role: 'spine' | 'leaf'; ru: number; label: string }): void => {
+    devices.push({ ...d, start_u: cursor_u + 1, pod_index: null })
+    cursor_u += d.ru
+  }
+
+  if (spine && spine.spines_needed > 0) {
+    const sw = switches.find((s) => s.id === spine.spine_model_id)
+    for (let i = 0; i < spine.spines_needed; i++) {
+      push({
+        device_id: `spine-${i + 1}`,
+        model_id: spine.spine_model_id,
+        role: 'spine',
+        ru: ru(sw),
+        label: `Spine ${i + 1} (${spine.spine_model_id})`
+      })
+    }
+  }
+
+  let leaf_serial = 0
+  let est_power_w = 0
+  for (const tier of tiers) {
+    if (tier.xor_status !== 'ok' || tier.leaves_required <= 0) continue
+    const sw = switches.find((s) => s.id === tier.leaf_model_id)
+    for (let i = 0; i < tier.leaves_required; i++) {
+      leaf_serial += 1
+      push({
+        device_id: `leaf-${leaf_serial}`,
+        model_id: tier.leaf_model_id,
+        role: 'leaf',
+        ru: ru(sw),
+        label: `Leaf ${leaf_serial} (${tier.leaf_model_id})`
+      })
+    }
+  }
+  for (const d of devices) {
+    const sw = switches.find((s) => s.id === d.model_id)
+    est_power_w += powerW(sw)
+  }
+
+  if (devices.length === 0) return []
+  return [
+    {
+      rack_name: LOGICAL_FABRIC_RACK_NAME,
+      size_u: cursor_u,
+      pdu_kw_budget: null,
+      estimated_power_w: est_power_w,
+      devices,
+      over_budget: false
+    }
+  ]
+}
+
 export function placeRacks(
   spine: SpineResult | null,
   tiers: TierResult[],

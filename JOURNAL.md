@@ -46,7 +46,56 @@ next time we hit a similar shape of problem.
   awkwardly; acceptable for v1, revisit if ugly).
 - **Why open:** environment limitation, not a code defect. Mirrors the existing
   react-flow / Radix preview limitations already logged below.
-- **Revisit:** next session with a display, or Phase 10 if Playwright smoke tests land.
+- **Update 2026-06-03 (follow-up session):** closed the one *code-level* gap that
+  would have made the browser-preview path itself wrong — the dev mock
+  (`install-mock-dcn.ts`) did **not** serve `ipn_routers.yaml`, so in browser
+  preview the Requirements IPN-router picker was empty and the multi-pod solver
+  had no router to pick (`pickIpnRouter` → null → `IPN_MODEL_NOT_SELECTED`).
+  Added an `ipnRouters` mirror (3 entries; the two 400G ones match the mock
+  switches) wired into the mock's `readYaml` + `fileExists`, plus a new
+  mock-backed test `src/renderer/src/lib/library-io-ipn.test.ts` (stubs
+  `globalThis.window`, installs the mock, asserts `loadIpnRouters` returns
+  non-empty schema-valid routers that project to `IpnRouterSpec`). Suite now
+  124/124 (was 121); typecheck + build clean; mock strings tree-shaken from the
+  prod bundle (0 occurrences). The seed→workspace copy was already wired
+  (`ensureWorkspace` seed list includes `ipn_routers.yaml`), so Electron was
+  unaffected — this was browser-preview parity only.
+- **RESOLVED 2026-06-03 (same follow-up session):** `xvfb` was installed
+  (`sudo apt-get install -y xvfb`) and the full Phase 9b UI was driven headless
+  via the Chrome DevTools Protocol (Electron launched with a dev-gated
+  `--remote-debugging-port`; a zero-dep Node CDP harness using Node 22's built-in
+  `WebSocket` screenshotted + clicked through the app). End-to-end pass: create
+  project → write 111-leaf ACI requirements → Design tab → **4 candidate cards
+  render correctly** (Multi-Pod/No-breakout = green Valid + Primary, the other 3
+  Invalid with specific blockers, IPN counts + spine↔IPN cable totals all right)
+  → Topology / Links inspected. **The GUI pass found a real integration bug**
+  (multi-pod views ignored the committed candidate when no rack inventory was
+  defined) — see Errors section "2026-06-03 — Multi-pod Topology/Links render a
+  flat 2-spine fabric…". Fixed + re-verified: Topology now renders 8 spines + 111
+  leaves + 2 IPN nodes + 4 pod boundaries (121 nodes), Links has 508 links incl.
+  64 spine↔IPN, 0 console errors throughout.
+- **Follow-up logged:** spine↔leaf wiring is still pod-agnostic — see new open
+  item "2026-06-03 — Multi-pod spine↔leaf wiring is not pod-local".
+
+### 2026-06-03 — Multi-pod spine↔leaf wiring is not pod-local
+- **Context:** the cable-links seeder (`cable-links-seeder.ts`) round-robins each
+  leaf's uplinks across **all** spines in the fabric, ignoring ACI pod membership.
+  In a multi-pod design this wires leaves to spines in other pods (e.g. with the
+  111-leaf fix in place, `leaf-2` — pod 0 — connects to `spine-3/4`, which are in
+  pod 1). The device counts, IPN nodes, pod boundaries, and spine↔IPN links are
+  all correct now; only the spine↔leaf *edge endpoints* cross pods.
+- **Correct behavior:** a leaf must connect only to the spines in its own pod
+  (`spine pod_index === leaf pod_index`). Each pod is an independent spine-leaf
+  fabric; cross-pod traffic rides the IPN, never a direct leaf→foreign-spine link.
+- **What's needed:** make the seeder's spine selection pod-aware — bucket spines
+  by `pod_index` (now present on every device in `rack_layout`) and round-robin
+  each leaf only within its pod's spine bucket. The data is already there; it's a
+  change to the spine-picking loop + a test asserting no cross-pod spine↔leaf link.
+- **Why open:** pre-existing (the round-robin was never pod-aware); surfaced by the
+  2026-06-03 GUI verification once the full 8-spine device set started rendering.
+  Out of scope for that session's approved fix (which was "make the committed
+  multi-pod candidate render at all without rack inventory").
+- **Revisit:** Phase 10, or a dedicated multi-pod-wiring fix session.
 
 ### 2026-05-13 — Multi-Pod ACI: IPN port budget per spine model (Phase 2b)
 - **Context:** Each spine in a multi-pod design reserves some primary ports for
@@ -302,6 +351,40 @@ earlier interim commit was dropped before the recommit.
 ---
 
 ## Errors / failures and resolutions
+
+### 2026-06-03 — Multi-pod Topology/Links render a flat 2-spine fabric when no rack inventory is defined
+- **Symptom:** committing a multi-pod candidate (111-leaf ACI: 8 spines / 4 pods /
+  2 IPNs) rendered correctly in the Design **candidate cards**, but Topology showed
+  only **2 spines + 111 leaves, no IPN nodes, no pod boundaries** (113 nodes) and
+  Links had **128 spine↔leaf links, zero spine↔IPN**. Found by the 2026-06-03
+  headless GUI verification (CDP harness) — the logic-layer tests had all passed.
+- **Root cause:** all multi-pod truth lives in `candidate.multipod`
+  (`pods_needed`, `spines_per_pod`, `ipn_routers_needed`…) and
+  `summary.total_spines`, but `projectCommittedCandidate` writes the candidate's
+  **per-pod** spine result onto top-level `design.spine.spines_needed` (= 2), and
+  the candidate's `rack_layout` was **empty** because `placeRacks` returns `[]`
+  for empty rack inventory (and `annotateMultiPodLayout` early-returns on an empty
+  layout, so no IPN rack either). Both downstream consumers —
+  `cable-links-seeder.ts` `devicesFromLayout` and `topology-extractor.ts`
+  `synthesiseDevicesFromSummary` — fall back to `design.spine.spines_needed` (2)
+  and explicitly drop IPNs when `rack_layout` is empty. So without rack inventory
+  the whole multi-pod structure vanished from every view except the cards.
+- **Fix:** new `synthesizeLogicalLayout(spine, tiers, switches)` in `domain/rack.ts`
+  builds a device-bearing (unracked) layout — every spine (`spines_needed` =
+  fabric total) + every leaf, same `spine-N`/`leaf-N` id scheme as `placeRacks`.
+  `buildMultiPodCandidate` uses it whenever `placeRacks` returns empty, then
+  `annotateMultiPodLayout` pod-tags it and appends the IPN rack. Because the
+  projection copies `c.rack_layout` to top-level and both consumers prefer
+  `rack_layout` over their fallbacks, all four views now agree. Regression test
+  added (`multipod.test.ts`: no-inventory candidate exposes 8 spines + 111 leaves
+  + 2 IPNs, pod-tagged). **Re-verified in the GUI:** Topology 121 nodes (8 spines
+  + 111 leaves + 2 IPN + 4 pod boundaries), Links 508 (444 spine↔leaf + 64
+  spine↔IPN), 0 console errors.
+- **Lesson:** unit tests fed the seeder/extractor hand-built `rack_layout`
+  fixtures, so they never exercised the empty-inventory fallback that the real
+  generate→project→seed→extract chain hits by default. Integration paths with
+  "reasonable defaults" (here: a brand-new project has no racks) need a test at
+  the seam, not just per-unit. The CDP GUI harness is what caught it.
 
 ### 2026-05-13 — RackView mount-effect yanked selection back to first rack on +Add rack
 - **Symptom:** Clicking **+ Add rack** in the Rack View sidebar created a new rack

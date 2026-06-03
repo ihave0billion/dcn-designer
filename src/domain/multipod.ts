@@ -1,6 +1,6 @@
 import { computeSpine } from './spine'
 import { pickUplinkGroup } from './tier'
-import { placeRacks } from './rack'
+import { placeRacks, synthesizeLogicalLayout } from './rack'
 import type {
   BreakoutAnalysis,
   BreakoutPair,
@@ -633,15 +633,26 @@ function buildMultiPodCandidate(
     : null
   const rackResult = placeRacks(rack_spine_for_layout, tiers, switches, rack_inventory)
   warnings.push(...rackResult.warnings)
+  // When no rack inventory exists, placeRacks returns an empty layout. A
+  // multi-pod design must still expose its full device set (every spine,
+  // every leaf, both IPN routers) so the Topology graph and the
+  // cable-links seeder render the committed candidate rather than falling
+  // back to the flat per-pod spine count. Synthesize a logical (unracked)
+  // layout in that case; annotateMultiPodLayout then pod-tags it and
+  // appends the dedicated IPN rack.
+  const base_layout =
+    rackResult.layout.length > 0
+      ? rackResult.layout
+      : synthesizeLogicalLayout(rack_spine_for_layout, tiers, switches)
   const rack_layout = ipn_router
-    ? annotateMultiPodLayout(rackResult.layout, {
+    ? annotateMultiPodLayout(base_layout, {
         total_spines,
         spines_per_pod,
         leaves_per_pod,
         ipn_router,
         ipn_count: ipn_routers_needed
       })
-    : rackResult.layout
+    : base_layout
 
   const optics_bom = buildCandidateOpticsBom(
     per_pod_tiers,
