@@ -6,7 +6,7 @@ import { z } from 'zod'
 //
 // Reset returns to the solver layout by deleting this file.
 
-export const RackDeviceRoleSchema = z.enum(['spine', 'leaf', 'server', 'blank'])
+export const RackDeviceRoleSchema = z.enum(['spine', 'leaf', 'server', 'blank', 'ipn'])
 export type RackDeviceRole = z.infer<typeof RackDeviceRoleSchema>
 
 export const RackMappingDeviceSchema = z.object({

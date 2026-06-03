@@ -237,6 +237,46 @@ describe('seedCableLinks', () => {
     expect(spine1Ports[1]).toBe('Eth1/2')
   })
 
+  it('seeds spine↔IPN links when the design carries an IPN rack (multi-pod)', () => {
+    const design = makeDesign({ leafCount: 2, spineCount: 2 })
+    // Append a solver-suggested IPN rack with 2 HA routers.
+    design.rack_layout.push({
+      rack_name: 'IPN',
+      size_u: 44,
+      pdu_kw_budget: null,
+      estimated_power_w: 1600,
+      over_budget: false,
+      devices: [
+        { device_id: 'ipn-1', model_id: 'N9K-C9332D-GX2B', role: 'ipn', start_u: 44, ru: 1, label: 'IPN 1' },
+        { device_id: 'ipn-2', model_id: 'N9K-C9332D-GX2B', role: 'ipn', start_u: 43, ru: 1, label: 'IPN 2' }
+      ]
+    })
+    const result = seedCableLinks({
+      design,
+      switches: [SPINE_SW, LEAF_SW],
+      fabric: { uplinks_per_leaf: 4, uplinks_per_spine: 2 },
+      breakoutPairs: [],
+      patchPanels: []
+    })
+    const ipnLinks = result.links.filter((l) => l.device_b.device_id.startsWith('ipn-'))
+    // 2 spines × 2 IPNs × 4 ports = 16 spine↔IPN links
+    expect(ipnLinks).toHaveLength(16)
+    // Spine-side ports come from the END of the 64-port list (reserved block)
+    const spine1IpnPorts = ipnLinks
+      .filter((l) => l.device_a.device_id === 'spine-1')
+      .map((l) => l.device_a.port)
+    expect(spine1IpnPorts).toContain('Eth1/64')
+    // IPN-side ports are sequential per router
+    const ipn1Ports = ipnLinks
+      .filter((l) => l.device_b.device_id === 'ipn-1')
+      .map((l) => l.device_b.port)
+    expect(ipn1Ports[0]).toBe('Eth1/1')
+    // Spine↔IPN links inherit the spine speed
+    expect(ipnLinks.every((l) => l.speed_g === 400)).toBe(true)
+    // Leaf links are still seeded (8) alongside the 16 IPN links
+    expect(result.links).toHaveLength(8 + 16)
+  })
+
   it('marks no patch panel needed when breakout is off', () => {
     const design = makeDesign({ leafCount: 1, spineCount: 2 })
     const result = seedCableLinks({

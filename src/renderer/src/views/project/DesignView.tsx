@@ -1,7 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, CheckCircle2, Loader2, Play, XCircle } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  GitFork,
+  Loader2,
+  Network,
+  Play,
+  XCircle
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
 import {
   Select,
   SelectContent,
@@ -25,20 +44,32 @@ import {
 } from '@/schemas/project'
 import type { Switch } from '@/schemas/switches'
 import {
+  deleteRackMapping,
+  deleteTopologyLayout,
+  ipnRouterSpecFromFileEntry,
   loadBreakoutPairs,
   loadCableLinks,
+  loadIpnRouters,
   loadPatchPanels,
+  loadRackMapping,
   loadSwitchesFile,
+  loadTopologyLayout,
   saveCableLinks
 } from '@/lib/library-io'
 import { runSolver } from '@/lib/solver-bridge'
 import { seedCableLinks } from '@/lib/cable-links-seeder'
+import { projectCommittedCandidate } from '@/lib/design-projection'
 import { useWorkspace } from '@/state/WorkspaceContext'
-import type {
-  DesignResult,
-  RackPlacement,
-  SolverWarning,
-  WarningCode
+import {
+  IPN_RACK_NAME,
+  IPN_RACK_SIZE_U,
+  type CandidateId,
+  type DesignCandidate,
+  type DesignResult,
+  type IpnRouterSpec,
+  type RackPlacement,
+  type SolverWarning,
+  type WarningCode
 } from '@domain'
 
 interface DesignViewProps {
@@ -56,10 +87,19 @@ export function DesignView({
 }: DesignViewProps) {
   const { workspacePath } = useWorkspace()
   const [switches, setSwitches] = useState<Switch[]>([])
+  const [ipnRouters, setIpnRouters] = useState<IpnRouterSpec[]>([])
   const [result, setResult] = useState<DesignResult | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [committing, setCommitting] = useState<CandidateId | null>(null)
   const [genErr, setGenErr] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  // When committing a candidate would clobber hand-edited fork files we
+  // pause and ask (decision 2026-06-01: warn → Regenerate fresh vs Keep).
+  const [pendingCommit, setPendingCommit] = useState<{
+    candidateId: CandidateId
+    projected: DesignResult
+    forks: string[]
+  } | null>(null)
 
   // Load library + any prior design.yaml on mount
   useEffect(() => {
@@ -67,6 +107,9 @@ export function DesignView({
     if (!workspacePath) return
     Promise.all([
       loadSwitchesFile(workspacePath).then((f) => f.switches).catch(() => [] as Switch[]),
+      loadIpnRouters(workspacePath)
+        .then((rs) => rs.map(ipnRouterSpecFromFileEntry))
+        .catch(() => [] as IpnRouterSpec[]),
       (async () => {
         const designPath = `${projectPath}/design.yaml`
         const exists = await window.dcn.fileExists(designPath)
@@ -77,9 +120,10 @@ export function DesignView({
           return null
         }
       })()
-    ]).then(([sw, prior]) => {
+    ]).then(([sw, ipn, prior]) => {
       if (cancelled) return
       setSwitches(sw)
+      setIpnRouters(ipn)
       setResult(prior)
       setLoaded(true)
     })
@@ -114,6 +158,42 @@ export function DesignView({
     [requirements, projectPath, onRequirementsChanged]
   )
 
+  // Re-seed cable_links.yaml from a (projected) design. `force` ignores
+  // an existing user fork; otherwise only seeds when the file is absent
+  // or still solver-sourced. Mirrors the Phase 5/6 fork pattern.
+  const reseedCableLinks = useCallback(
+    async (design: DesignResult, force: boolean) => {
+      if (!workspacePath) return
+      try {
+        const existing = await loadCableLinks(projectPath)
+        if (!force && existing != null && existing.source !== 'solver') return
+        const breakoutPairs = await loadBreakoutPairs(workspacePath)
+        const patchPanels = await loadPatchPanels(workspacePath)
+        const seeded = seedCableLinks({
+          design,
+          switches,
+          fabric: {
+            uplinks_per_leaf: requirements.fabric.uplinks_per_leaf,
+            uplinks_per_spine: requirements.fabric.uplinks_per_spine
+          },
+          breakoutPairs,
+          patchPanels
+        })
+        await saveCableLinks(projectPath, {
+          schema_version: 1,
+          source: 'solver',
+          seeded_at: new Date().toISOString(),
+          forked_at: null,
+          links: seeded.links
+        })
+      } catch (seedErr) {
+        // eslint-disable-next-line no-console
+        console.warn('[cable-links seed] failed:', seedErr)
+      }
+    },
+    [workspacePath, projectPath, requirements, switches]
+  )
+
   // ── Generate Design ───────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
     if (!workspacePath) return
@@ -121,45 +201,103 @@ export function DesignView({
     setGenErr(null)
     try {
       const breakoutPairs = await loadBreakoutPairs(workspacePath)
-      const design = runSolver({ requirements, switches, breakoutPairs })
+      const raw = runSolver({ requirements, switches, breakoutPairs, ipnRouters })
+      // Top-level fields mirror the committed (= primary) candidate so the
+      // Rack / Links / Topology views render the active design.
+      const design = projectCommittedCandidate(raw)
       await window.dcn.writeYaml(`${projectPath}/design.yaml`, design)
       setResult(design)
-      // Auto-seed cable_links.yaml when no user fork exists. Mirrors the
-      // Phase 5 rack_mapping fork pattern — once the user edits links,
-      // source flips to 'user' and Generate stops touching the file.
-      try {
-        const existing = await loadCableLinks(projectPath)
-        if (existing == null || existing.source === 'solver') {
-          const patchPanels = await loadPatchPanels(workspacePath)
-          const seeded = seedCableLinks({
-            design,
-            switches,
-            fabric: {
-              uplinks_per_leaf: requirements.fabric.uplinks_per_leaf,
-              uplinks_per_spine: requirements.fabric.uplinks_per_spine
-            },
-            breakoutPairs,
-            patchPanels
-          })
-          await saveCableLinks(projectPath, {
-            schema_version: 1,
-            source: 'solver',
-            seeded_at: new Date().toISOString(),
-            forked_at: null,
-            links: seeded.links
-          })
-        }
-      } catch (seedErr) {
-        // Don't block the design save on a seed failure — surface it.
-        // eslint-disable-next-line no-console
-        console.warn('[cable-links seed] failed:', seedErr)
-      }
+      await reseedCableLinks(design, false)
     } catch (e) {
       setGenErr(e instanceof Error ? e.message : String(e))
     } finally {
       setGenerating(false)
     }
-  }, [workspacePath, projectPath, requirements, switches])
+  }, [workspacePath, projectPath, requirements, switches, ipnRouters, reseedCableLinks])
+
+  // Ensure requirements.racks has the solver-suggested IPN rack so Rack
+  // View (driven by requirements.racks) renders the IPN routers.
+  const ensureIpnRack = useCallback(async () => {
+    if (requirements.racks.some((r) => r.name === IPN_RACK_NAME)) return
+    const next: RequirementsFile = {
+      ...requirements,
+      racks: [
+        ...requirements.racks,
+        { name: IPN_RACK_NAME, size_u: IPN_RACK_SIZE_U, pdu_kw_budget: null, location: '', tags: [] }
+      ],
+      project: { ...requirements.project, last_edited: new Date().toISOString() }
+    }
+    const parsed = RequirementsFileSchema.safeParse(next)
+    if (!parsed.success) return
+    await window.dcn.writeYaml(`${projectPath}/requirements.yaml`, parsed.data)
+    onRequirementsChanged(parsed.data)
+  }, [requirements, projectPath, onRequirementsChanged])
+
+  // Apply a committed candidate: write projected design.yaml, add the IPN
+  // rack when multi-pod, and re-seed cable_links. `regenerateForks` also
+  // discards rack_mapping + topology_layout forks so they re-derive.
+  const applyCommit = useCallback(
+    async (projected: DesignResult, regenerateForks: boolean) => {
+      await window.dcn.writeYaml(`${projectPath}/design.yaml`, projected)
+      setResult(projected)
+      const cand = projected.candidates.find((c) => c.id === projected.committed_candidate_id)
+      if (cand?.multipod) await ensureIpnRack()
+      if (regenerateForks) {
+        await deleteRackMapping(projectPath)
+        await deleteTopologyLayout(projectPath)
+      }
+      await reseedCableLinks(projected, regenerateForks)
+    },
+    [projectPath, ensureIpnRack, reseedCableLinks]
+  )
+
+  // ── Commit a candidate (the "use this design" toggle) ─────────────
+  const handleCommit = useCallback(
+    async (candidateId: CandidateId) => {
+      if (!result || candidateId === result.committed_candidate_id) return
+      setCommitting(candidateId)
+      setGenErr(null)
+      try {
+        const projected = projectCommittedCandidate(result, candidateId)
+        // Detect hand-edited fork files that this commit would affect.
+        const [links, mapping, topo] = await Promise.all([
+          loadCableLinks(projectPath).catch(() => null),
+          loadRackMapping(projectPath).catch(() => null),
+          loadTopologyLayout(projectPath).catch(() => null)
+        ])
+        const forks: string[] = []
+        if (links && links.source === 'user') forks.push('cable_links.yaml')
+        if (mapping) forks.push('rack_mapping.yaml')
+        if (topo && topo.source === 'user') forks.push('topology_layout.yaml')
+        if (forks.length > 0) {
+          setPendingCommit({ candidateId, projected, forks })
+          return
+        }
+        await applyCommit(projected, false)
+      } catch (e) {
+        setGenErr(e instanceof Error ? e.message : String(e))
+      } finally {
+        setCommitting(null)
+      }
+    },
+    [result, projectPath, applyCommit]
+  )
+
+  const resolvePendingCommit = useCallback(
+    async (regenerate: boolean) => {
+      if (!pendingCommit) return
+      setCommitting(pendingCommit.candidateId)
+      try {
+        await applyCommit(pendingCommit.projected, regenerate)
+      } catch (e) {
+        setGenErr(e instanceof Error ? e.message : String(e))
+      } finally {
+        setPendingCommit(null)
+        setCommitting(null)
+      }
+    },
+    [pendingCommit, applyCommit]
+  )
 
   // ── Generate-readiness checks ─────────────────────────────────────
   const perLeafSelected = requirements.input_mode === 'per_leaf'
@@ -347,6 +485,16 @@ export function DesignView({
           </CardContent>
         </Card>
 
+        {/* Candidate matrix — Multi-Pod ACI comparison (Phase 9b) */}
+        {loaded && result && result.candidates.length > 0 && (
+          <CandidateMatrix
+            result={result}
+            switchById={switchById}
+            committing={committing}
+            onCommit={handleCommit}
+          />
+        )}
+
         {/* Results panel — only after generate */}
         {loaded && result ? (
           <ResultsPanel result={result} switchById={switchById} />
@@ -361,6 +509,48 @@ export function DesignView({
           )
         )}
       </div>
+
+      {/* Commit-switch fork reconciliation dialog */}
+      <AlertDialog
+        open={pendingCommit != null}
+        onOpenChange={(o) => {
+          if (!o) setPendingCommit(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Committing changes the device set</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  This candidate has a different set of devices than the one you committed before.
+                  You have hand-edited file{pendingCommit && pendingCommit.forks.length === 1 ? '' : 's'}{' '}
+                  that reference the old layout:
+                </p>
+                <ul className="list-disc pl-5 font-mono text-xs">
+                  {pendingCommit?.forks.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+                <p>
+                  <strong>Regenerate fresh</strong> discards those edits and re-derives the layout
+                  from the new candidate. <strong>Keep my edits</strong> leaves your files as-is
+                  (some devices may be missing or orphaned until you reconcile them).
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button variant="outline" onClick={() => void resolvePendingCommit(false)}>
+              Keep my edits
+            </Button>
+            <AlertDialogAction onClick={() => void resolvePendingCommit(true)}>
+              Regenerate fresh
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -798,6 +988,191 @@ function RackBlock({ rack }: { rack: RackPlacement }) {
           </span>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Candidate matrix — Multi-Pod ACI comparison cards (Phase 9b)
+// ────────────────────────────────────────────────────────────────────
+
+const CANDIDATE_ORDER: CandidateId[] = [
+  'single_no_breakout',
+  'single_with_breakout',
+  'multi_no_breakout',
+  'multi_with_breakout'
+]
+
+const CANDIDATE_LABELS: Record<CandidateId, { pod: string; breakout: string }> = {
+  single_no_breakout: { pod: 'Single-pod', breakout: 'No breakout' },
+  single_with_breakout: { pod: 'Single-pod', breakout: 'With breakout' },
+  multi_no_breakout: { pod: 'Multi-Pod', breakout: 'No breakout' },
+  multi_with_breakout: { pod: 'Multi-Pod', breakout: 'With breakout' }
+}
+
+function CandidateMatrix({
+  result,
+  switchById,
+  committing,
+  onCommit
+}: {
+  result: DesignResult
+  switchById: Map<string, Switch>
+  committing: CandidateId | null
+  onCommit(id: CandidateId): void
+}) {
+  const byId = new Map(result.candidates.map((c) => [c.id, c]))
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Design candidates</CardTitle>
+        <CardDescription>
+          The solver computes all four strategies in parallel. The{' '}
+          <span className="font-medium">primary</span> is the simplest valid one; commit a different
+          candidate to drive the Rack, Links, and Topology views.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {CANDIDATE_ORDER.map((id) => {
+            const c = byId.get(id)
+            if (!c) return null
+            return (
+              <CandidateCard
+                key={id}
+                candidate={c}
+                isPrimary={id === result.primary_candidate_id}
+                isCommitted={id === result.committed_candidate_id}
+                committing={committing === id}
+                committeeBusy={committing != null}
+                onCommit={() => onCommit(id)}
+                switchById={switchById}
+              />
+            )
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function CandidateCard({
+  candidate: c,
+  isPrimary,
+  isCommitted,
+  committing,
+  committeeBusy,
+  onCommit,
+  switchById
+}: {
+  candidate: DesignCandidate
+  isPrimary: boolean
+  isCommitted: boolean
+  committing: boolean
+  committeeBusy: boolean
+  onCommit(): void
+  switchById: Map<string, Switch>
+}) {
+  const labels = CANDIDATE_LABELS[c.id]
+  const pods = c.multipod?.pods_needed ?? 1
+  const blocker = c.warnings.find((w) => w.severity === 'error') ?? null
+  const spineModel = c.spine ? switchById.get(c.spine.spine_model_id) : null
+  return (
+    <div
+      className={cn(
+        'rounded-lg border p-3 space-y-2.5 transition-colors',
+        isCommitted
+          ? 'border-primary ring-1 ring-primary bg-primary/5'
+          : c.valid
+            ? 'border-emerald-200 dark:border-emerald-900/60'
+            : 'border-border bg-muted/20'
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="font-medium text-sm flex items-center gap-1.5">
+            {c.pod_variant === 'multi' && <Network className="size-3.5 text-muted-foreground" />}
+            {labels.pod}
+          </div>
+          <div className="text-xs text-muted-foreground">{labels.breakout}</div>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          {c.valid ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 text-[10px] font-medium px-2 py-0.5">
+              <CheckCircle2 className="size-3" />
+              Valid
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 text-destructive text-[10px] font-medium px-2 py-0.5">
+              <XCircle className="size-3" />
+              Invalid
+            </span>
+          )}
+          {isPrimary && (
+            <span className="rounded-full bg-violet-100 text-violet-900 dark:bg-violet-950/60 dark:text-violet-200 text-[10px] font-medium px-2 py-0.5">
+              Primary
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+        <CandKv k="Pods" v={String(pods)} />
+        <CandKv k="Spines" v={`${c.total_spines}${pods > 1 ? ` (${c.multipod?.spines_per_pod}/pod)` : ''}`} />
+        <CandKv k="IPN routers" v={String(c.total_ipn_routers)} />
+        <CandKv k="Oversub" v={c.computed_oversub_label} />
+        {c.multipod && (
+          <>
+            <CandKv k="Leaf split" v={c.multipod.leaves_per_pod.join(' / ')} />
+            <CandKv k="Spine↔IPN" v={`${c.multipod.spine_to_ipn_links} cables`} />
+          </>
+        )}
+        <CandKv k="Host BW" v={`${c.total_host_bw_g} G`} />
+        <CandKv k="Uplink BW" v={`${c.total_uplink_bw_g} G`} />
+      </div>
+
+      {spineModel && (
+        <div className="text-[11px] text-muted-foreground font-mono truncate">
+          spine {c.spine?.spine_model_id}
+          {c.multipod?.ipn_router_model_id && ` · ipn ${c.multipod.ipn_router_model_id}`}
+        </div>
+      )}
+
+      {!c.valid && blocker && (
+        <div className="text-[11px] text-destructive flex items-start gap-1">
+          <AlertTriangle className="size-3 mt-0.5 shrink-0" />
+          <span>{blocker.message}</span>
+        </div>
+      )}
+
+      <div className="pt-1">
+        {isCommitted ? (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-primary">
+            <GitFork className="size-3.5" />
+            Committed — active design
+          </span>
+        ) : (
+          <Button
+            size="sm"
+            variant={c.valid ? 'default' : 'outline'}
+            className="h-7 text-xs"
+            disabled={committeeBusy}
+            onClick={onCommit}
+          >
+            {committing ? <Loader2 className="animate-spin" /> : null}
+            Commit this candidate
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CandKv({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-muted-foreground">{k}</span>
+      <span className="font-medium text-right">{v}</span>
     </div>
   )
 }

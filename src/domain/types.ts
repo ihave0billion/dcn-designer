@@ -213,12 +213,17 @@ export interface OpticsBomEntry {
 }
 
 export interface RackDevicePlacement {
-  device_id: string // e.g. "leaf-1", "spine-2", "server-3"
+  device_id: string // e.g. "leaf-1", "spine-2", "server-3", "ipn-1"
   model_id: string
-  role: 'spine' | 'leaf' | 'server'
+  role: 'spine' | 'leaf' | 'server' | 'ipn'
   start_u: number
   ru: number
   label: string
+  // ACI Multi-Pod membership (Phase 9b). null on single-pod designs and
+  // on IPN routers (which are shared across pods). Spines + leaves in a
+  // multi-pod candidate carry their 0-based pod index so the Topology
+  // view can draw pod boundaries.
+  pod_index?: number | null
 }
 
 export interface RackPlacement {

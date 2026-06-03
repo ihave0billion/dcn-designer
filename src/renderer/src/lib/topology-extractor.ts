@@ -17,7 +17,7 @@ import type { CableLink } from '@/schemas/cable-links'
 // edge has somewhere to attach (and a count of orphans is returned for
 // drift-detection later — see JOURNAL "Solver-regen drift detection").
 
-export type TopologyRole = 'spine' | 'leaf'
+export type TopologyRole = 'spine' | 'leaf' | 'ipn'
 
 export interface TopologyNode {
   id: string // matches device_id from rack_layout / cable_links
@@ -27,6 +27,10 @@ export interface TopologyNode {
   label: string
   ru: number | null
   power_w: number | null
+  // ACI Multi-Pod membership (Phase 9b). null/undefined on single-pod
+  // designs and on IPN routers (shared across pods). Drives pod-boundary
+  // grouping. Optional so pre-9b fixtures and callers stay valid.
+  pod_index?: number | null
   // Ports that have at least one cable link attached. Stable-sorted.
   // These render as react-flow Handles on the node.
   usedPorts: string[]
@@ -62,20 +66,23 @@ interface DeviceMeta {
   label: string
   ru: number | null
   power_w: number | null
+  pod_index: number | null
 }
 
-// Walk rack_layout and collect spine + leaf devices keyed by device_id.
-// Leaves a stable iteration order: spines first (in rack order), then
-// leaves (in rack order). Servers are dropped per Phase 7 Q1.
+// Walk rack_layout and collect IPN + spine + leaf devices keyed by
+// device_id. Stable order: IPNs first, then spines, then leaves (rack
+// order within each). Servers are dropped per Phase 7 Q1.
 function collectDevicesFromLayout(design: DesignResult): {
+  ipns: Array<{ id: string } & DeviceMeta>
   spines: Array<{ id: string } & DeviceMeta>
   leaves: Array<{ id: string } & DeviceMeta>
 } {
+  const ipns: Array<{ id: string } & DeviceMeta> = []
   const spines: Array<{ id: string } & DeviceMeta> = []
   const leaves: Array<{ id: string } & DeviceMeta> = []
   for (const rack of design.rack_layout) {
     for (const d of rack.devices) {
-      if (d.role !== 'spine' && d.role !== 'leaf') continue
+      if (d.role !== 'spine' && d.role !== 'leaf' && d.role !== 'ipn') continue
       const entry = {
         id: d.device_id,
         role: d.role as TopologyRole,
@@ -83,13 +90,15 @@ function collectDevicesFromLayout(design: DesignResult): {
         rack: rack.rack_name,
         label: d.label || d.device_id,
         ru: d.ru ?? null,
-        power_w: null
+        power_w: null,
+        pod_index: d.pod_index ?? null
       } satisfies { id: string } & DeviceMeta
-      if (d.role === 'spine') spines.push(entry)
+      if (d.role === 'ipn') ipns.push(entry)
+      else if (d.role === 'spine') spines.push(entry)
       else leaves.push(entry)
     }
   }
-  return { spines, leaves }
+  return { ipns, spines, leaves }
 }
 
 // Fallback: when rack_layout is empty (no racks defined yet), synthesise
@@ -111,7 +120,8 @@ function synthesiseDevicesFromSummary(design: DesignResult): {
         rack: null,
         label: `Spine ${i + 1}`,
         ru: null,
-        power_w: null
+        power_w: null,
+        pod_index: null
       })
     }
   }
@@ -127,7 +137,8 @@ function synthesiseDevicesFromSummary(design: DesignResult): {
         rack: null,
         label: `Leaf ${serial}`,
         ru: null,
-        power_w: null
+        power_w: null,
+        pod_index: null
       })
     }
   }
@@ -138,12 +149,14 @@ export function extractTopology(
   design: DesignResult,
   cableLinks: CableLink[]
 ): TopologyGraph {
-  let { spines, leaves } = collectDevicesFromLayout(design)
+  let { ipns, spines, leaves } = collectDevicesFromLayout(design)
   if (spines.length === 0 && leaves.length === 0) {
     ;({ spines, leaves } = synthesiseDevicesFromSummary(design))
+    ipns = []
   }
 
   const meta = new Map<string, DeviceMeta>()
+  for (const ip of ipns) meta.set(ip.id, ip)
   for (const s of spines) meta.set(s.id, s)
   for (const l of leaves) meta.set(l.id, l)
 
@@ -176,7 +189,8 @@ export function extractTopology(
       rack: null,
       label: orphanId,
       ru: null,
-      power_w: null
+      power_w: null,
+      pod_index: null
     })
     leaves.push({
       id: orphanId,
@@ -185,7 +199,8 @@ export function extractTopology(
       rack: null,
       label: orphanId,
       ru: null,
-      power_w: null
+      power_w: null,
+      pod_index: null
     })
   }
 
@@ -200,17 +215,23 @@ export function extractTopology(
       label: entry.label,
       ru: entry.ru,
       power_w: entry.power_w,
+      pod_index: entry.pod_index,
       usedPorts
     }
   }
 
-  // Spines on top, leaves on bottom — same order they came from the
-  // layout walk.
-  const nodes: TopologyNode[] = [...spines.map(buildNode), ...leaves.map(buildNode)]
+  // IPNs on top, spines in the middle, leaves on the bottom — same order
+  // they came from the layout walk.
+  const nodes: TopologyNode[] = [
+    ...ipns.map(buildNode),
+    ...spines.map(buildNode),
+    ...leaves.map(buildNode)
+  ]
 
   // Edges: source = spine end if either end is a spine; otherwise just
   // device_a. cable_links.yaml seeded from Phase 6 always has device_a =
-  // spine, but a user-imported CSV could swap them.
+  // spine, but a user-imported CSV could swap them. (Both spine↔leaf and
+  // spine↔IPN links keep spine as the source.)
   const spineIds = new Set(spines.map((s) => s.id))
   const edges: TopologyEdge[] = cableLinks.map((link) => {
     const aIsSpine = spineIds.has(link.device_a.device_id)

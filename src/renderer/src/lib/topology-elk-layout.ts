@@ -41,7 +41,9 @@ export function nodeDimensions(node: TopologyNode): { width: number; height: num
     NODE_BASE_WIDTH,
     NODE_BASE_WIDTH + (portCount - 4) * NODE_PORT_WIDTH
   )
-  const height = node.role === 'spine' ? NODE_HEIGHT_SPINE : NODE_HEIGHT_LEAF
+  // IPN routers sit in their own top tier; size them like spines.
+  const height =
+    node.role === 'spine' || node.role === 'ipn' ? NODE_HEIGHT_SPINE : NODE_HEIGHT_LEAF
   return { width, height }
 }
 
@@ -54,18 +56,14 @@ export async function autoLayout(graph: TopologyGraph): Promise<LaidOutTopology>
 
   const elkNodes: ElkNode[] = graph.nodes.map((n) => {
     const { width, height } = nodeDimensions(n)
-    return {
-      id: n.id,
-      width,
-      height,
-      // Pin spines to the top layer, leaves to the bottom. Without this
-      // hint, elk sometimes interleaves them when the edge graph is
-      // sparse (e.g. very small designs).
-      layoutOptions: {
-        'elk.layered.layering.layerConstraint':
-          n.role === 'spine' ? 'FIRST' : 'LAST'
-      }
-    }
+    // Pin IPNs to the top layer and leaves to the bottom; spines fall in
+    // the middle (no constraint — elk places them between the two based
+    // on edges). Without these hints elk sometimes interleaves tiers when
+    // the edge graph is sparse (e.g. very small designs).
+    const layoutOptions: Record<string, string> = {}
+    if (n.role === 'ipn') layoutOptions['elk.layered.layering.layerConstraint'] = 'FIRST'
+    else if (n.role === 'leaf') layoutOptions['elk.layered.layering.layerConstraint'] = 'LAST'
+    return { id: n.id, width, height, layoutOptions }
   })
 
   const elkEdges: ElkExtendedEdge[] = graph.edges.map((e: TopologyEdge) => ({

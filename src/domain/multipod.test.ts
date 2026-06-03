@@ -392,3 +392,84 @@ describe('buildCandidates direct invocation (no full solve)', () => {
     expect(out.primary_candidate_id).toBe('single_with_breakout')
   })
 })
+
+describe('Phase 9b — IPN rack placement + ACI pod tagging', () => {
+  // Same 111-leaf fixture but with rack inventory so the multi-pod
+  // candidates produce a placed rack_layout (IPN rack + pod_index).
+  const requirements: SolverRequirements = {
+    fabric: {
+      uplinks_per_leaf: 4,
+      uplinks_per_spine: 2,
+      spine_model_id: 'N9K-C9364D-GX2A',
+      use_case: 'dcn',
+      input_mode: 'aggregate',
+      ipn_router_model_id: 'N9K-C9332D-GX2B'
+    },
+    tiers: [
+      {
+        speed_tier_label: '25G',
+        endpoint_count: null,
+        switch_count: 111,
+        leaf_model_id: 'N9348Y2C6D-SE1U',
+        override_uplink_speed_g: 100
+      }
+    ],
+    // Generous so all 115 devices place without RACK_INSUFFICIENT_SPACE.
+    racks: [
+      { name: 'Rack A', size_u: 100, pdu_kw_budget: null },
+      { name: 'Rack B', size_u: 100, pdu_kw_budget: null },
+      { name: 'Rack C', size_u: 100, pdu_kw_budget: null }
+    ]
+  }
+
+  const out = solve(requirements, context)
+
+  it('multi_with_breakout appends a dedicated IPN rack with 2 routers', () => {
+    const c = getCandidate(out.candidates, 'multi_with_breakout')
+    const ipnRack = c.rack_layout.find((r) => r.rack_name === 'IPN')
+    expect(ipnRack).toBeDefined()
+    expect(ipnRack!.devices).toHaveLength(2)
+    expect(ipnRack!.devices.every((d) => d.role === 'ipn')).toBe(true)
+    expect(ipnRack!.devices.every((d) => d.pod_index == null)).toBe(true)
+    expect(ipnRack!.devices.map((d) => d.device_id)).toEqual(['ipn-1', 'ipn-2'])
+    expect(ipnRack!.devices.every((d) => d.model_id === 'N9K-C9332D-GX2B')).toBe(true)
+  })
+
+  it('multi_with_breakout tags spines + leaves with their ACI pod_index (56+55 split)', () => {
+    const c = getCandidate(out.candidates, 'multi_with_breakout')
+    const placed = c.rack_layout
+      .filter((r) => r.rack_name !== 'IPN')
+      .flatMap((r) => r.devices)
+    const spines = placed.filter((d) => d.role === 'spine')
+    const leaves = placed.filter((d) => d.role === 'leaf')
+    expect(spines).toHaveLength(4)
+    expect(leaves).toHaveLength(111)
+    expect(spines.every((d) => d.pod_index === 0 || d.pod_index === 1)).toBe(true)
+    const pod0 = leaves.filter((d) => d.pod_index === 0).length
+    const pod1 = leaves.filter((d) => d.pod_index === 1).length
+    expect([pod0, pod1].sort((a, b) => b - a)).toEqual([56, 55])
+  })
+
+  it('single-pod candidate has no IPN rack and null pod_index', () => {
+    const c = getCandidate(out.candidates, 'single_with_breakout')
+    expect(c.rack_layout.some((r) => r.rack_name === 'IPN')).toBe(false)
+    const devices = c.rack_layout.flatMap((r) => r.devices)
+    expect(devices.length).toBeGreaterThan(0)
+    expect(devices.every((d) => d.pod_index == null)).toBe(true)
+  })
+
+  it('does not place spines/leaves into a pre-existing IPN rack (re-generate path)', () => {
+    // Mirrors the state after committing multi-pod once: requirements
+    // now carries a solver-managed "IPN" rack. A second Generate must
+    // not put fabric devices there nor append a duplicate IPN rack.
+    const withIpnRack: SolverRequirements = {
+      ...requirements,
+      racks: [...(requirements.racks ?? []), { name: 'IPN', size_u: 44, pdu_kw_budget: null }]
+    }
+    const out2 = solve(withIpnRack, context)
+    const c = getCandidate(out2.candidates, 'multi_with_breakout')
+    const ipnRacks = c.rack_layout.filter((r) => r.rack_name === 'IPN')
+    expect(ipnRacks).toHaveLength(1)
+    expect(ipnRacks[0].devices.every((d) => d.role === 'ipn')).toBe(true)
+  })
+})

@@ -2,6 +2,7 @@ import { solve } from '@domain'
 import type {
   BreakoutPair,
   DesignResult,
+  IpnRouterSpec,
   SolverContext,
   SolverRequirements,
   SwitchSpec
@@ -39,7 +40,9 @@ export function requirementsToSolverInput(req: RequirementsFile): SolverRequirem
       uplinks_per_spine: req.fabric.uplinks_per_spine,
       spine_model_id: req.fabric.spine_model_id,
       use_case: req.use_case,
-      input_mode: req.input_mode
+      input_mode: req.input_mode,
+      aci_multipod_allowed: req.fabric.aci_multipod_allowed,
+      ipn_router_model_id: req.fabric.ipn_router_model_id
     },
     tiers: req.tiers.map((t) => ({
       speed_tier_label: t.speed_tier_label,
@@ -60,12 +63,19 @@ export interface SolveInputs {
   requirements: RequirementsFile
   switches: Switch[]
   breakoutPairs: BreakoutPair[]
+  ipnRouters?: IpnRouterSpec[]
 }
 
-export function runSolver({ requirements, switches, breakoutPairs }: SolveInputs): DesignResult {
+export function runSolver({
+  requirements,
+  switches,
+  breakoutPairs,
+  ipnRouters
+}: SolveInputs): DesignResult {
   const context: SolverContext = {
     switches: switches.map(switchToSpec),
-    breakout_pairs: breakoutPairs
+    breakout_pairs: breakoutPairs,
+    ipn_routers: ipnRouters
   }
   return solve(requirementsToSolverInput(requirements), context)
 }

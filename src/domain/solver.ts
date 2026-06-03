@@ -2,7 +2,7 @@ import { computeTier } from './tier'
 import { computeSpine } from './spine'
 import { checkUseCaseConstraints } from './use-case'
 import { placeRacks } from './rack'
-import { buildCandidates } from './multipod'
+import { buildCandidates, IPN_RACK_NAME } from './multipod'
 import { pickIpnRouter } from './ipn'
 import type {
   DesignResult,
@@ -126,12 +126,18 @@ export function solve(
 
   // ──────────────────────────────────────────────────────────────────
   // Rack placement
+  //
+  // The "IPN" rack is solver-managed (added to requirements.racks once a
+  // multi-pod candidate is committed). Exclude it from device placement
+  // so spines/leaves never land there and multi-pod candidates don't
+  // append a duplicate IPN rack on a subsequent Generate.
   // ──────────────────────────────────────────────────────────────────
+  const deviceRacks = (requirements.racks ?? []).filter((r) => r.name !== IPN_RACK_NAME)
   const rackResult = placeRacks(
     spineComp.spine,
     tierResults,
     context.switches,
-    requirements.racks ?? []
+    deviceRacks
   )
   warnings.push(...rackResult.warnings)
 
@@ -189,7 +195,7 @@ export function solve(
     fabric: requirements.fabric,
     breakout_pairs: context.breakout_pairs,
     switches: context.switches,
-    rack_inventory: requirements.racks ?? []
+    rack_inventory: deviceRacks
   })
   warnings.push(...candidatesOut.fabric_warnings)
 

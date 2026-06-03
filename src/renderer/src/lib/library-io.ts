@@ -16,7 +16,15 @@ import {
   TopologyLayoutFileSchema,
   type TopologyLayoutFile
 } from '@/schemas/topology-layout'
-import { BreakoutPairsFileSchema, type BreakoutPair, type BreakoutPairsFile } from '@domain'
+import {
+  BreakoutPairsFileSchema,
+  IpnRoutersFileSchema,
+  ipnRouterSpecFromFileEntry,
+  type BreakoutPair,
+  type BreakoutPairsFile,
+  type IpnRouterFileEntry,
+  type IpnRouterSpec
+} from '@domain'
 
 export function librarySwitchesPath(workspacePath: string): string {
   return `${workspacePath}/library/switches.yaml`
@@ -122,6 +130,34 @@ export async function loadBreakoutPairs(workspacePath: string): Promise<Breakout
 }
 
 export type { BreakoutPair, BreakoutPairsFile }
+
+// ────────────────────────────────────────────────────────────────────
+// IPN routers — Inter-Pod Network device library (Phase 2b/9b)
+// Seeded into workspace/library/ipn_routers.yaml on first run. Consumed
+// by the multi-pod solver and the Requirements IPN-router picker.
+// ────────────────────────────────────────────────────────────────────
+
+export function libraryIpnRoutersPath(workspacePath: string): string {
+  return `${workspacePath}/library/ipn_routers.yaml`
+}
+
+// Returns [] when the file is missing (older workspaces predate the
+// Phase 2b bootstrap). The multi-pod candidates flag IPN_MODEL_NOT_SELECTED
+// when the list is empty.
+export async function loadIpnRouters(workspacePath: string): Promise<IpnRouterFileEntry[]> {
+  const path = libraryIpnRoutersPath(workspacePath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return []
+  const raw = await window.dcn.readYaml(path)
+  const parsed = IpnRoutersFileSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`ipn_routers.yaml schema validation failed: ${parsed.error.message}`)
+  }
+  return parsed.data.ipn_routers
+}
+
+export { ipnRouterSpecFromFileEntry }
+export type { IpnRouterFileEntry, IpnRouterSpec }
 
 // ────────────────────────────────────────────────────────────────────
 // Rack mapping — user-curated rack layout (Phase 5)

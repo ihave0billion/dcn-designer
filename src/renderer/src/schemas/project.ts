@@ -59,7 +59,15 @@ export type TierRow = z.infer<typeof TierRowSchema>
 export const FabricSchema = z.object({
   uplinks_per_leaf: z.number().int().positive().default(4),
   uplinks_per_spine: z.number().int().positive().default(2),
-  spine_model_id: z.string().nullable().default(null)
+  spine_model_id: z.string().nullable().default(null),
+  // ACI Multi-Pod controls (Phase 9b). `aci_multipod_allowed` defaults
+  // to true so the candidate matrix is always computed and the user can
+  // discover the option; setting false blocks multi-pod candidates.
+  // `ipn_router_model_id` selects which IPN router (from
+  // ipn_routers.yaml) terminates the spine↔IPN links; null = solver
+  // falls back to the first library entry.
+  aci_multipod_allowed: z.boolean().default(true),
+  ipn_router_model_id: z.string().nullable().default(null)
 })
 export type Fabric = z.infer<typeof FabricSchema>
 
@@ -141,7 +149,13 @@ export function emptyRequirements(project: ProjectMeta): RequirementsFile {
     use_case: 'dcn',
     input_mode: 'aggregate',
     tiers: [],
-    fabric: { uplinks_per_leaf: 4, uplinks_per_spine: 2, spine_model_id: null },
+    fabric: {
+      uplinks_per_leaf: 4,
+      uplinks_per_spine: 2,
+      spine_model_id: null,
+      aci_multipod_allowed: true,
+      ipn_router_model_id: null
+    },
     constraints: {
       aci_capable_required: false,
       rocev2_required: false,

@@ -52,7 +52,10 @@ function pushDevice(
     role: d.role,
     start_u,
     ru: d.ru,
-    label: d.label
+    label: d.label,
+    // Single-pod placement has no ACI pod membership; multi-pod
+    // candidates annotate this afterward (see multipod.ts).
+    pod_index: null
   })
   rack.estimated_power_w += d.power_w
   return true

@@ -1,4 +1,5 @@
 import type { DesignResult, BreakoutPair } from '@domain'
+import { IPN_PORTS_PER_SPINE_PER_IPN } from '@domain'
 import type { Switch } from '@/schemas/switches'
 import type { PatchPanel } from '@/schemas/patch-panels'
 import type { CableLink } from '@/schemas/cable-links'
@@ -286,5 +287,77 @@ export function seedCableLinks(input: SeedCableLinksInput): SeedCableLinksResult
     }
   }
 
+  // ── Spine ↔ IPN links (multi-pod committed candidate) ──────────────
+  // Every spine connects to every IPN router via `ports_per_spine_per_ipn`
+  // ports. Spine-side ports are taken from the END of the spine's native
+  // port list (the reserved IPN block, so they don't collide with the
+  // leaf uplinks taken from the start). IPN-side ports are assigned
+  // sequentially per router.
+  const ipns = ipnDevicesFromLayout(design)
+  if (ipns.length > 0) {
+    const committed = design.candidates.find((c) => c.id === design.committed_candidate_id)
+    const portsPerSpinePerIpn =
+      committed?.multipod?.ports_per_spine_per_ipn ?? IPN_PORTS_PER_SPINE_PER_IPN
+    const ipnLinkSpeed = design.spine?.spine_speed_g ?? 0
+    const reservedPerSpine = ipns.length * portsPerSpinePerIpn
+    const ipnPortCursors = new Map<string, number>()
+    for (const ip of ipns) ipnPortCursors.set(ip.device_id, 0)
+    let ipnOverflowWarned = false
+
+    for (const spine of spines) {
+      const native = spinePrimaryPorts(spine.model_id, switches)
+      const reserved = native.slice(Math.max(0, native.length - reservedPerSpine))
+      let ri = 0
+      for (const ip of ipns) {
+        for (let k = 0; k < portsPerSpinePerIpn; k++) {
+          const spinePort = reserved[ri]
+          ri += 1
+          if (!spinePort) {
+            if (!ipnOverflowWarned) {
+              notes.push(
+                `Spine ${spine.device_id} ran out of reserved ports for IPN uplinks — some spine↔IPN links omitted.`
+              )
+              ipnOverflowWarned = true
+            }
+            continue
+          }
+          const ipnCursor = ipnPortCursors.get(ip.device_id) ?? 0
+          const ipnPort = `Eth1/${ipnCursor + 1}`
+          ipnPortCursors.set(ip.device_id, ipnCursor + 1)
+          linkSerial += 1
+          links.push({
+            id: `link-${linkSerial.toString().padStart(4, '0')}`,
+            device_a: { rack: spine.rack, device_id: spine.device_id, port: spinePort },
+            device_b: { rack: ip.rack, device_id: ip.device_id, port: ipnPort },
+            speed_g: ipnLinkSpeed,
+            optic_id: null,
+            patch_panel_id: null,
+            label: `${spine.device_id}:${spinePort} ↔ ${ip.device_id}:${ipnPort}`,
+            length_m: null,
+            notes: 'spine↔IPN (multi-pod)'
+          })
+        }
+      }
+    }
+  }
+
   return { links, notes }
+}
+
+interface IpnDevice {
+  device_id: string
+  model_id: string
+  rack: string | null
+}
+
+function ipnDevicesFromLayout(design: DesignResult): IpnDevice[] {
+  const ipns: IpnDevice[] = []
+  for (const rack of design.rack_layout) {
+    for (const d of rack.devices) {
+      if (d.role === 'ipn') {
+        ipns.push({ device_id: d.device_id, model_id: d.model_id, rack: rack.rack_name })
+      }
+    }
+  }
+  return ipns
 }

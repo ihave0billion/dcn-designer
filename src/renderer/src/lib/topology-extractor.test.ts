@@ -214,6 +214,49 @@ describe('extractTopology', () => {
     const graph = extractTopology(design, [])
     for (const n of graph.nodes) expect(n.usedPorts).toEqual([])
   })
+
+  it('includes IPN nodes, pod_index tags, and spine↔IPN edges (multi-pod)', () => {
+    const design = makeDesign({ spines: 2, leaves: 2 })
+    const rackA = design.rack_layout[0]
+    rackA.devices.find((d) => d.device_id === 'spine-1')!.pod_index = 0
+    rackA.devices.find((d) => d.device_id === 'spine-2')!.pod_index = 1
+    rackA.devices.find((d) => d.device_id === 'leaf-1')!.pod_index = 0
+    rackA.devices.find((d) => d.device_id === 'leaf-2')!.pod_index = 1
+    design.rack_layout.push({
+      rack_name: 'IPN',
+      size_u: 44,
+      pdu_kw_budget: null,
+      estimated_power_w: 0,
+      over_budget: false,
+      devices: [
+        { device_id: 'ipn-1', model_id: 'N9K-IPN', role: 'ipn', start_u: 44, ru: 1, label: 'IPN 1', pod_index: null }
+      ]
+    })
+    const links: CableLink[] = [
+      makeLink('link-1', 'spine-1', 'Eth1/1', 'leaf-1', 'Eth1/49'),
+      {
+        id: 'ipn-link-1',
+        device_a: { rack: null, device_id: 'spine-1', port: 'Eth1/64' },
+        device_b: { rack: null, device_id: 'ipn-1', port: 'Eth1/1' },
+        speed_g: 400,
+        optic_id: null,
+        patch_panel_id: null,
+        label: '',
+        length_m: null,
+        notes: null
+      }
+    ]
+    const graph = extractTopology(design, links)
+    const ipn = graph.nodes.find((n) => n.role === 'ipn')
+    expect(ipn?.id).toBe('ipn-1')
+    expect(graph.nodes.find((n) => n.id === 'spine-1')?.pod_index).toBe(0)
+    expect(graph.nodes.find((n) => n.id === 'leaf-2')?.pod_index).toBe(1)
+    // Spine↔IPN edge keeps the spine as source.
+    const ipnEdge = graph.edges.find((e) => e.target === 'ipn-1')
+    expect(ipnEdge?.source).toBe('spine-1')
+    // IPN nodes lead the node list (top tier).
+    expect(graph.nodes[0].role).toBe('ipn')
+  })
 })
 
 describe('comparePortNames', () => {

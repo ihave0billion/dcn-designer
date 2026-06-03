@@ -165,15 +165,20 @@ function TopologyCanvas({
 
     const applyPositions = (positions: Map<string, { x: number; y: number }>) => {
       if (cancelled) return
-      const rfNodes: RFNode<TopoNodeData>[] = graph.nodes.map((n) => {
+      const deviceNodes: RFNode<TopoNodeData>[] = graph.nodes.map((n) => {
         const pos = positions.get(n.id) ?? { x: 0, y: 0 }
         return {
           id: n.id,
-          type: n.role === 'spine' ? 'spineNode' : 'leafNode',
+          type:
+            n.role === 'spine' ? 'spineNode' : n.role === 'ipn' ? 'ipnNode' : 'leafNode',
           position: pos,
           data: { topo: n }
         }
       })
+      // Pod boundary backdrops (multi-pod only) sit behind the device
+      // nodes so each pod reads as a soft labeled region.
+      const boundaryNodes = computePodBoundaries(graph.nodes, positions)
+      const rfNodes = [...boundaryNodes, ...deviceNodes]
       const rfEdges: RFEdge<TopoEdgeData>[] = graph.edges.map((e) => ({
         id: e.id,
         source: e.source,
@@ -234,10 +239,12 @@ function TopologyCanvas({
   const persistPositions = useCallback(
     async (currentNodes: RFNode<TopoNodeData>[]) => {
       try {
-        const positions: LaidOutPosition[] = currentNodes.map((n) => {
-          const dim = nodeDimensions(n.data.topo)
-          return { device_id: n.id, x: n.position.x, y: n.position.y, ...dim }
-        })
+        const positions: LaidOutPosition[] = currentNodes
+          .filter((n) => n.data?.topo) // drop pod-boundary backdrops
+          .map((n) => {
+            const dim = nodeDimensions(n.data.topo)
+            return { device_id: n.id, x: n.position.x, y: n.position.y, ...dim }
+          })
         const now = new Date().toISOString()
         const next: TopologyLayoutFile = {
           schema_version: 1,
@@ -298,9 +305,13 @@ function TopologyCanvas({
       const laid = await autoLayout(graph)
       const positionMap = new Map<string, { x: number; y: number }>()
       for (const p of laid.positions) positionMap.set(p.device_id, { x: p.x, y: p.y })
-      setNodes((prev) =>
-        prev.map((n) => ({ ...n, position: positionMap.get(n.id) ?? n.position }))
-      )
+      setNodes((prev) => {
+        const devices = prev
+          .filter((n) => n.data?.topo)
+          .map((n) => ({ ...n, position: positionMap.get(n.id) ?? n.position }))
+        const boundaries = computePodBoundaries(graph.nodes, positionMap)
+        return [...boundaries, ...devices]
+      })
       // Persist after a tick so nodesRef sees the new state.
       requestAnimationFrame(() => {
         void persistPositions(nodesRef.current)
@@ -338,7 +349,12 @@ function TopologyCanvas({
 
   // ── Memoized node types so react-flow doesn't recreate them ─────────
   const nodeTypes: NodeTypes = useMemo(
-    () => ({ spineNode: SpineNodeRenderer, leafNode: LeafNodeRenderer }),
+    () => ({
+      spineNode: SpineNodeRenderer,
+      leafNode: LeafNodeRenderer,
+      ipnNode: IpnNodeRenderer,
+      podBoundary: PodBoundaryRenderer
+    }),
     []
   )
 
@@ -475,7 +491,8 @@ export function TopologyView(props: TopologyViewProps) {
 
 const ROLE_COLORS = {
   spine: { bg: 'bg-violet-50 dark:bg-violet-950/40', border: 'border-violet-300 dark:border-violet-800', text: 'text-violet-900 dark:text-violet-100', tag: 'bg-violet-200 dark:bg-violet-900 text-violet-900 dark:text-violet-100' },
-  leaf: { bg: 'bg-sky-50 dark:bg-sky-950/40', border: 'border-sky-300 dark:border-sky-800', text: 'text-sky-900 dark:text-sky-100', tag: 'bg-sky-200 dark:bg-sky-900 text-sky-900 dark:text-sky-100' }
+  leaf: { bg: 'bg-sky-50 dark:bg-sky-950/40', border: 'border-sky-300 dark:border-sky-800', text: 'text-sky-900 dark:text-sky-100', tag: 'bg-sky-200 dark:bg-sky-900 text-sky-900 dark:text-sky-100' },
+  ipn: { bg: 'bg-amber-50 dark:bg-amber-950/40', border: 'border-amber-300 dark:border-amber-800', text: 'text-amber-900 dark:text-amber-100', tag: 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100' }
 } as const
 
 function SpineNodeRenderer({ data, selected }: NodeProps<RFNode<TopoNodeData>>) {
@@ -484,6 +501,12 @@ function SpineNodeRenderer({ data, selected }: NodeProps<RFNode<TopoNodeData>>) 
 
 function LeafNodeRenderer({ data, selected }: NodeProps<RFNode<TopoNodeData>>) {
   return <PortNodeRenderer data={data} selected={selected ?? false} portSide="top" />
+}
+
+// IPN routers sit in the top tier; their ports face down toward the
+// spines below them.
+function IpnNodeRenderer({ data, selected }: NodeProps<RFNode<TopoNodeData>>) {
+  return <PortNodeRenderer data={data} selected={selected ?? false} portSide="bottom" />
 }
 
 function PortNodeRenderer({
@@ -558,6 +581,13 @@ function PortNodeRenderer({
           </span>
         </div>
         <div className="text-[11px] opacity-70 font-mono truncate">{node.model_id}</div>
+        {node.pod_index != null && (
+          <div className="text-[10px] mt-1">
+            <span className="rounded bg-foreground/10 px-1.5 py-0.5 font-medium">
+              Pod {node.pod_index + 1}
+            </span>
+          </div>
+        )}
         {node.rack && (
           <div className="text-[10px] opacity-60 mt-1">
             Rack: <span className="font-mono">{node.rack}</span>
@@ -601,6 +631,70 @@ function shortPortName(p: string): string {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Pod boundaries (Multi-Pod ACI) — soft labeled backdrop per pod
+// ────────────────────────────────────────────────────────────────────
+
+const POD_PAD = 28
+const POD_LABEL_H = 24
+
+// Build non-interactive backdrop nodes, one per ACI pod, sized to the
+// bounding box of that pod's spines + leaves. Returns [] for single-pod
+// designs (no node carries a pod_index).
+function computePodBoundaries(
+  nodes: TopologyNode[],
+  positions: Map<string, { x: number; y: number }>
+): RFNode<TopoNodeData>[] {
+  const pods = new Map<number, { minX: number; minY: number; maxX: number; maxY: number }>()
+  for (const n of nodes) {
+    if (n.pod_index == null) continue
+    const pos = positions.get(n.id)
+    if (!pos) continue
+    const dim = nodeDimensions(n)
+    const b = pods.get(n.pod_index) ?? {
+      minX: Infinity,
+      minY: Infinity,
+      maxX: -Infinity,
+      maxY: -Infinity
+    }
+    b.minX = Math.min(b.minX, pos.x)
+    b.minY = Math.min(b.minY, pos.y)
+    b.maxX = Math.max(b.maxX, pos.x + dim.width)
+    b.maxY = Math.max(b.maxY, pos.y + dim.height)
+    pods.set(n.pod_index, b)
+  }
+  const out: RFNode<TopoNodeData>[] = []
+  for (const [pod, b] of [...pods.entries()].sort((a, c) => a[0] - c[0])) {
+    if (!Number.isFinite(b.minX)) continue
+    out.push({
+      id: `pod-boundary-${pod}`,
+      type: 'podBoundary',
+      position: { x: b.minX - POD_PAD, y: b.minY - POD_PAD - POD_LABEL_H },
+      data: { podLabel: `Pod ${pod + 1}` } as unknown as TopoNodeData,
+      draggable: false,
+      selectable: false,
+      focusable: false,
+      zIndex: -1,
+      style: {
+        width: b.maxX - b.minX + POD_PAD * 2,
+        height: b.maxY - b.minY + POD_PAD * 2 + POD_LABEL_H
+      }
+    })
+  }
+  return out
+}
+
+function PodBoundaryRenderer({ data }: NodeProps<RFNode<TopoNodeData>>) {
+  const label = (data as unknown as { podLabel?: string }).podLabel ?? 'Pod'
+  return (
+    <div className="w-full h-full rounded-xl border-2 border-dashed border-amber-400/50 bg-amber-100/10 dark:bg-amber-400/[0.04] pointer-events-none">
+      <div className="text-xs font-semibold text-amber-700 dark:text-amber-300 px-2 pt-1">
+        {label}
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Properties panels
 // ────────────────────────────────────────────────────────────────────
 
@@ -634,6 +728,7 @@ function NodePropertiesPanel({
         )}
         <KV label="Model" value={<span className="font-mono">{node.model_id}</span>} />
         <KV label="Role" value={node.role} />
+        {node.pod_index != null && <KV label="Pod" value={`Pod ${node.pod_index + 1}`} />}
         <KV label="Rack" value={node.rack ?? <span className="text-muted-foreground">—</span>} />
         <KV label="RU" value={node.ru ?? <span className="text-muted-foreground">—</span>} />
         <div>

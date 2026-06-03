@@ -32,7 +32,7 @@ import {
   type InputMode
 } from '@/schemas/project'
 import type { Switch } from '@/schemas/switches'
-import { loadSwitchesFile } from '@/lib/library-io'
+import { loadSwitchesFile, loadIpnRouters, type IpnRouterFileEntry } from '@/lib/library-io'
 import { useWorkspace } from '@/state/WorkspaceContext'
 
 interface RequirementsViewProps {
@@ -63,6 +63,7 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
   const [saveErr, setSaveErr] = useState<string | null>(null)
   const [saveOk, setSaveOk] = useState(false)
   const [switches, setSwitches] = useState<Switch[]>([])
+  const [ipnRouters, setIpnRouters] = useState<IpnRouterFileEntry[]>([])
   const [librarySnoozed, setLibrarySnoozed] = useState<boolean>(() => {
     return localStorage.getItem(LIBRARY_REVIEW_KEY(projectPath)) === '1'
   })
@@ -83,6 +84,9 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
     loadSwitchesFile(workspacePath)
       .then((file) => setSwitches(file.switches))
       .catch(() => setSwitches([]))
+    loadIpnRouters(workspacePath)
+      .then((routers) => setIpnRouters(routers))
+      .catch(() => setIpnRouters([]))
   }, [workspacePath])
 
   const leafCandidates = useMemo(
@@ -578,6 +582,53 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                   </span>
                 )}
             </p>
+
+            {/* ── ACI Multi-Pod (Phase 9b) ─────────────────────────── */}
+            <div className="border-t pt-4 space-y-3">
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={form.fabric.aci_multipod_allowed}
+                  onCheckedChange={(v) =>
+                    patch('fabric', { ...form.fabric, aci_multipod_allowed: !!v })
+                  }
+                />
+                <span>
+                  Allow ACI Multi-Pod
+                  <span className="block text-xs text-muted-foreground">
+                    Lets the solver offer multi-pod candidates. Requires Cisco Premier+ licensing
+                    in production. Unchecking blocks multi-pod candidates (they still appear, marked
+                    license-blocked).
+                  </span>
+                </span>
+              </label>
+              <Field label="IPN router model">
+                <Select
+                  value={form.fabric.ipn_router_model_id ?? '__auto'}
+                  onValueChange={(v) =>
+                    patch('fabric', {
+                      ...form.fabric,
+                      ipn_router_model_id: v === '__auto' ? null : v
+                    })
+                  }
+                >
+                  <SelectTrigger className="max-w-md">
+                    <SelectValue placeholder="(auto)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__auto">Auto (first in library)</SelectItem>
+                    {ipnRouters.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.model_display ?? r.id} · {r.primary.ports}× {r.primary.speed_g}G
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                Inter-Pod Network router used to stitch pods together (2 per site for HA). The
+                solver reserves {`${4}`} ports per spine per IPN.
+              </p>
+            </div>
           </Section>
 
           <Section id="constraints" title="Constraints" description="Solver filters and notes.">

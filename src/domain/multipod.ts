@@ -10,7 +10,9 @@ import type {
   IpnRouterSpec,
   MultiPodAnalysis,
   OpticsBomEntry,
+  RackDevicePlacement,
   RackInventoryEntry,
+  RackPlacement,
   SolverWarning,
   SpineResult,
   SwitchSpec,
@@ -25,8 +27,98 @@ import type {
 export const IPN_PORTS_PER_SPINE_PER_IPN = 4
 export const IPN_HA_MIN = 2
 
+// Solver-suggested IPN rack (Phase 9b). When a multi-pod candidate is
+// committed the IPN routers land here; the Design-view commit handler
+// adds a matching "IPN" entry to requirements.racks so Rack View renders
+// it (Rack View is driven by requirements.racks).
+export const IPN_RACK_NAME = 'IPN'
+export const IPN_RACK_SIZE_U = 44
+const DEFAULT_IPN_RU = 1
+const DEFAULT_IPN_POWER_W = 800
+
 const HA_MIN_SPINES = 2 // v8 rule 7
 const FANOUT_WITH_BREAKOUT = 4
+
+// Map each fabric device id to its 0-based ACI pod. Spine ids are
+// `spine-1..total_spines`, chunked by spines_per_pod; leaf ids are
+// `leaf-1..total_leaves`, chunked by the leaves_per_pod split. Mirrors
+// the device-id scheme placeRacks() emits so we can annotate its output.
+function buildPodIndexMaps(
+  total_spines: number,
+  spines_per_pod: number,
+  leaves_per_pod: number[]
+): { spinePod: Map<string, number>; leafPod: Map<string, number> } {
+  const spinePod = new Map<string, number>()
+  for (let i = 0; i < total_spines; i++) {
+    const pod = spines_per_pod > 0 ? Math.floor(i / spines_per_pod) : 0
+    spinePod.set(`spine-${i + 1}`, pod)
+  }
+  const leafPod = new Map<string, number>()
+  let serial = 0
+  for (let pod = 0; pod < leaves_per_pod.length; pod++) {
+    for (let k = 0; k < leaves_per_pod[pod]; k++) {
+      serial += 1
+      leafPod.set(`leaf-${serial}`, pod)
+    }
+  }
+  return { spinePod, leafPod }
+}
+
+// Annotate a flat (single-pod-style) rack layout with ACI pod_index per
+// spine/leaf and append a dedicated IPN rack carrying `ipn_count`
+// routers. Returns a new layout array; the input is not mutated. When
+// the layout is empty (no rack inventory) it's returned unchanged — the
+// IPN rack is only meaningful alongside placed spines/leaves.
+export function annotateMultiPodLayout(
+  layout: RackPlacement[],
+  opts: {
+    total_spines: number
+    spines_per_pod: number
+    leaves_per_pod: number[]
+    ipn_router: IpnRouterSpec
+    ipn_count: number
+  }
+): RackPlacement[] {
+  if (layout.length === 0) return layout
+  const { spinePod, leafPod } = buildPodIndexMaps(
+    opts.total_spines,
+    opts.spines_per_pod,
+    opts.leaves_per_pod
+  )
+  const annotated: RackPlacement[] = layout.map((rack) => ({
+    ...rack,
+    devices: rack.devices.map((d) => {
+      if (d.role === 'spine') return { ...d, pod_index: spinePod.get(d.device_id) ?? null }
+      if (d.role === 'leaf') return { ...d, pod_index: leafPod.get(d.device_id) ?? null }
+      return { ...d, pod_index: null }
+    })
+  }))
+
+  // Build the IPN rack (top-of-rack packed, HA routers stacked downward).
+  const ipn_ru = opts.ipn_router.ru ?? DEFAULT_IPN_RU
+  const ipn_power = opts.ipn_router.power_w ?? DEFAULT_IPN_POWER_W
+  const ipnDevices: RackDevicePlacement[] = []
+  for (let i = 0; i < opts.ipn_count; i++) {
+    ipnDevices.push({
+      device_id: `ipn-${i + 1}`,
+      model_id: opts.ipn_router.id,
+      role: 'ipn' as const,
+      start_u: IPN_RACK_SIZE_U - i * ipn_ru - ipn_ru + 1,
+      ru: ipn_ru,
+      label: `IPN ${i + 1} (${opts.ipn_router.id})`,
+      pod_index: null
+    })
+  }
+  annotated.push({
+    rack_name: IPN_RACK_NAME,
+    size_u: IPN_RACK_SIZE_U,
+    pdu_kw_budget: null,
+    estimated_power_w: ipn_power * opts.ipn_count,
+    devices: ipnDevices,
+    over_budget: false
+  })
+  return annotated
+}
 
 // Mirrors the same heuristic as spine.ts: a 'spine'-role switch
 // presents `primary` as its downlink surface, a 'both'-role switch
@@ -533,13 +625,23 @@ function buildMultiPodCandidate(
     effective_spine_ports
   }
 
-  // Rack layout for the fabric-wide spine count (Phase 9b will add
-  // pod-grouped rendering; Phase 2b just lays them out flat).
+  // Rack layout for the fabric-wide spine count. Phase 9b annotates the
+  // flat placement with ACI pod_index per spine/leaf and appends a
+  // dedicated IPN rack carrying the HA IPN routers.
   const rack_spine_for_layout: SpineResult | null = per_pod_comp.spine
     ? { ...per_pod_comp.spine, spine_model_id: spine_switch.id, spines_needed: total_spines, spine_ports: native_spine_ports }
     : null
   const rackResult = placeRacks(rack_spine_for_layout, tiers, switches, rack_inventory)
   warnings.push(...rackResult.warnings)
+  const rack_layout = ipn_router
+    ? annotateMultiPodLayout(rackResult.layout, {
+        total_spines,
+        spines_per_pod,
+        leaves_per_pod,
+        ipn_router,
+        ipn_count: ipn_routers_needed
+      })
+    : rackResult.layout
 
   const optics_bom = buildCandidateOpticsBom(
     per_pod_tiers,
@@ -561,7 +663,7 @@ function buildMultiPodCandidate(
     spine: spineResult,
     breakout: breakoutResult,
     multipod,
-    rack_layout: rackResult.layout,
+    rack_layout,
     optics_bom,
     warnings,
     total_spines,

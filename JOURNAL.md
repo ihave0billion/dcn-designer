@@ -24,6 +24,30 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-06-03 — Phase 9b Multi-Pod UI shipped without browser/GUI verification
+- **Context:** Phase 9b (candidate cards + commit toggle, IPN nodes + pod
+  boundaries on Topology, IPN rack on Rack View, spine↔IPN seeding on Links,
+  Requirements toggle) was built and verified at the **logic layer only** —
+  `npm run typecheck` + `npm test` (121/121) + `npm run build` all clean, with
+  new unit tests covering domain IPN placement/pod tagging, the
+  candidate-projection helper, the spine↔IPN seeder, and the IPN topology
+  extractor. **No browser-automation tool was available in this headless VM**
+  this session (the prior phases' "browser preview" capability wasn't present),
+  so the rendered UI (candidate cards, pod-boundary backdrops, IPN node
+  renderer, IPN rack swatch, commit-switch AlertDialog) has **not** been
+  eyeballed.
+- **What's needed:** a manual sanity pass in Electron (`npm run dev:linux`):
+  build the 111-leaf ACI design → Generate → confirm 4 candidate cards →
+  Commit a multi-pod candidate → confirm Topology shows IPN nodes + 2 pod
+  boundaries + spine↔IPN edges, Rack View shows the amber IPN rack, Links lists
+  spine↔IPN rows. Watch for: pod-boundary node z-order/pointer-events (set
+  `zIndex:-1` + `pointer-events:none`, untested visually), and spine↔IPN edge
+  routing (both spine + IPN handles face "down" — edges will draw but may curve
+  awkwardly; acceptable for v1, revisit if ugly).
+- **Why open:** environment limitation, not a code defect. Mirrors the existing
+  react-flow / Radix preview limitations already logged below.
+- **Revisit:** next session with a display, or Phase 10 if Playwright smoke tests land.
+
 ### 2026-05-13 — Multi-Pod ACI: IPN port budget per spine model (Phase 2b)
 - **Context:** Each spine in a multi-pod design reserves some primary ports for
   IPN uplinks (typically 4–8 per spine, per Cisco DC reference designs). The
@@ -54,11 +78,19 @@ next time we hit a similar shape of problem.
   choose** — show what would be orphaned (devices gone) vs missing (new IPNs
   with no rack/links), then offer "Regenerate fresh" vs "Keep my edits".
   Non-destructive default; never silently discard hand-edits. (PROJECT_PLAN Open
-  Risk #9 + 2026-06-01 session log row.) The *behavior* is settled; the
-  *implementation* stays open and folds into the unified pass below.
-- **Why open:** Phase 9b scope; design depends on Phase 2b candidate model.
-- **Revisit:** as part of the unified regenerate-aware editing pass — fold into
-  whichever phase ships that.
+  Risk #9 + 2026-06-01 session log row.)
+- **Implemented 2026-06-03 (Phase 9b):** the *commit-switch* trigger is done in
+  `DesignView` — `handleCommit` detects hand-edited forks (`cable_links` with
+  `source: 'user'`, any `rack_mapping`, `topology_layout` with `source: 'user'`)
+  and, when present, opens an AlertDialog offering **Regenerate fresh** (deletes
+  rack_mapping + topology_layout, re-seeds cable_links) vs **Keep my edits**
+  (leaves forks; re-seeds only solver-sourced cable_links). When no forks exist
+  it re-seeds silently. Commit re-projects the committed candidate onto
+  `design.yaml` top-level via `lib/design-projection.ts`.
+- **Still open:** the *requirements-change* trigger (user edits requirements →
+  re-Generate produces a different device set than the forks reference) is NOT
+  handled — that's the broader unified regenerate-aware editing pass below.
+- **Revisit:** the unified pass folds into Phase 10.
 
 ### 2026-05-13 — Solver-regen drift detection for forked rack layouts, cable links, AND topology layout (Phases 5 + 6 + 7 follow-up)
 - **Context:** Phase 5 (`rack_mapping.yaml`), Phase 6 (`cable_links.yaml`), and Phase 7

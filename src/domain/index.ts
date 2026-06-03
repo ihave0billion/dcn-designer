@@ -12,8 +12,11 @@ export {
   buildCandidates,
   distributeEvenly,
   pickPrimaryCandidate,
+  annotateMultiPodLayout,
   IPN_PORTS_PER_SPINE_PER_IPN,
-  IPN_HA_MIN
+  IPN_HA_MIN,
+  IPN_RACK_NAME,
+  IPN_RACK_SIZE_U
 } from './multipod'
 export { ipnRouterSpecFromFileEntry, pickIpnRouter } from './ipn'
 export {

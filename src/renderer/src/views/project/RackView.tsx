@@ -766,6 +766,8 @@ function deviceColor(role: RackMappingDevice['role']): string {
       return 'bg-sky-100 border-sky-300 text-sky-900 dark:bg-sky-950/60 dark:border-sky-800 dark:text-sky-200 hover:bg-sky-200/80'
     case 'server':
       return 'bg-emerald-100 border-emerald-300 text-emerald-900 dark:bg-emerald-950/60 dark:border-emerald-800 dark:text-emerald-200 hover:bg-emerald-200/80'
+    case 'ipn':
+      return 'bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-950/60 dark:border-amber-800 dark:text-amber-200 hover:bg-amber-200/80'
     case 'blank':
       return 'bg-muted/50 border-dashed border-muted-foreground/40 text-muted-foreground hover:bg-muted'
   }
