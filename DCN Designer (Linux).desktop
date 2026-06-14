@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DCN Designer (Linux)
+Comment=Launch the DCN Designer app (dev mode) on Linux
+Exec=/home/user/Development/claude-code-dcn-designer/scripts/launch-linux.sh
+Path=/home/user/Development/claude-code-dcn-designer
+Icon=network-workgroup
+Terminal=false
+Categories=Development;Network;
+StartupNotify=true

@@ -12,6 +12,15 @@ if (process.platform === 'linux' && process.env.ELECTRON_DISABLE_SANDBOX === '1'
   app.commandLine.appendSwitch('no-sandbox')
 }
 
+// Linux/VNC: a real X display (e.g. TigerVNC) advertises GLX, so Chromium tries
+// hardware GL, fails to initialize the GPU process, and wedges the compositor —
+// the window paints black and CDP captureScreenshot hangs. Force the software
+// renderer for VM dev runs so the app paints on a remote display. Gated on the
+// same VM signal as the sandbox opt-out; inert in production.
+if (process.platform === 'linux' && process.env.ELECTRON_DISABLE_SANDBOX === '1') {
+  app.disableHardwareAcceleration()
+}
+
 // Dev/test only: expose the Chrome DevTools Protocol on a TCP port so a headless
 // harness can screenshot + drive the renderer (e.g. Phase 9b GUI verification on
 // a display-less VM). Inert unless DCN_CDP_PORT is set; never set in production.
