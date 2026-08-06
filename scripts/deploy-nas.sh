@@ -20,6 +20,11 @@ CONTAINER="dcn-designer"
 DATA_DIR="/mnt/user/appdata/dcn-designer"
 LAN_IP="${DCN_LAN_IP:-192.0.2.121}"
 LAN_PORT="${DCN_LAN_PORT:-80}"
+# Pinned so the router's DHCP reservation stays valid across redeploys. Docker's macvlan
+# driver happens to derive this same value from the IP (02:42 + the IP in hex), but that's
+# undocumented behaviour — don't leave the reservation depending on it. If you change
+# LAN_IP, update the router reservation to match this MAC.
+LAN_MAC="${DCN_LAN_MAC:-02:42:xx:xx:xx:xx}"
 
 cd "$(dirname "$0")/.."
 
@@ -38,6 +43,7 @@ ssh "${HOST}" "set -e
     --restart unless-stopped \
     --network br0 \
     --ip '${LAN_IP}' \
+    --mac-address '${LAN_MAC}' \
     -v '${DATA_DIR}':/data \
     -e DCN_WORKSPACE=/data \
     -e PORT=${LAN_PORT} \

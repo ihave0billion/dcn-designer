@@ -31,8 +31,20 @@ Two consequences worth knowing:
 - **The NAS host cannot reach `192.0.2.121`.** That's an inherent macvlan restriction, not
   a misconfiguration — a host can't talk to its own macvlan children. Health checks run from
   a laptop instead. Other machines on the LAN are unaffected.
-- **`.121` is not DHCP-reserved.** Worth adding a reservation on the router so nothing else
-  is ever handed that address.
+### DHCP reservation
+
+Reserve the address on the router so nothing else is ever handed it:
+
+| | |
+|---|---|
+| IP | `192.0.2.121` |
+| MAC | `02:42:xx:xx:xx:xx` |
+
+The MAC is pinned explicitly by the deploy script (`--mac-address`), so it survives
+redeploys and container recreates. Docker's macvlan driver would derive the same value
+from the IP anyway (`02:42` + the IP in hex), but that's undocumented behaviour and the
+reservation shouldn't depend on it. **If you change `DCN_LAN_IP`, keep `DCN_LAN_MAC` as
+is — or update the router reservation to match.**
 
 ## Redeploying after a change
 
