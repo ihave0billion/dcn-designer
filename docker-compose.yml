@@ -4,8 +4,9 @@ services:
     container_name: dcn-designer
     restart: unless-stopped
     ports:
-      # LAN-reachable from any laptop on the network.
-      - "8788:8788"
+      # LAN-reachable from any laptop on the network. Host port 8789 — 8788 is taken
+      # by bookshelf-audio on the NAS.
+      - "8789:8788"
     volumes:
       # Library + all projects. Survives image rebuilds; back this up.
       - /mnt/user/appdata/dcn-designer:/data

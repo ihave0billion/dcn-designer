@@ -14,9 +14,13 @@ ENV NODE_ENV=production
 ENV DCN_WORKSPACE=/data
 ENV PORT=8788
 
-# Only `yaml` and `adm-zip` are needed at runtime; the rest of the tree is build-time.
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+# Only `yaml` and `adm-zip` are needed at runtime — everything else in the dependency
+# list belongs to the renderer and is already baked into the static bundle. Both are
+# dependency-free, so copying them from the build stage keeps the exact lockfile
+# versions without shipping the other ~500MB of build tooling.
+COPY package.json ./
+COPY --from=build /app/node_modules/yaml ./node_modules/yaml
+COPY --from=build /app/node_modules/adm-zip ./node_modules/adm-zip
 
 COPY --from=build /app/out/web ./out/web
 COPY src/server ./src/server
