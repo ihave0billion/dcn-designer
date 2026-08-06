@@ -10,13 +10,29 @@ The app has two targets from one codebase:
 
 | | |
 |---|---|
-| URL | <http://192.0.2.83:8789/> |
-| Host | Unraid NAS (`ssh nas`) |
+| URL | **<http://192.0.2.121/>** (port 80) |
+| Host | Unraid NAS (`ssh nas`), container on the `br0` macvlan |
 | Container | `dcn-designer`, `--restart unless-stopped` |
 | Workspace | `/mnt/user/appdata/dcn-designer` → `/data` in the container |
 | Auth | none — LAN only (see below) |
 
-Port 8789 because 8788 is taken by `bookshelf-audio`.
+### Why a dedicated IP
+
+It has to be a **low port**: the work MacBook's security software blocks outbound to high
+ports. But the NAS host's own low ports are already spoken for — 80 and 443 are the Unraid
+webGUI (nginx), and another service holds `192.0.2.83:443`.
+
+So the container joins the `br0` macvlan and takes its own LAN address, `192.0.2.121`,
+where port 80 is free. This is the same pattern the Hermes containers already use
+(`.117`–`.120`).
+
+Two consequences worth knowing:
+
+- **The NAS host cannot reach `192.0.2.121`.** That's an inherent macvlan restriction, not
+  a misconfiguration — a host can't talk to its own macvlan children. Health checks run from
+  a laptop instead. Other machines on the LAN are unaffected.
+- **`.121` is not DHCP-reserved.** Worth adding a reservation on the router so nothing else
+  is ever handed that address.
 
 ## Redeploying after a change
 
@@ -59,7 +75,8 @@ The renderer is identical; only the four native file dialogs have no browser equ
 | Variable | Default | Purpose |
 |---|---|---|
 | `DCN_WORKSPACE` | `~/DCN-Designer` | Workspace root. Every request path is jailed under it. |
-| `PORT` | `8788` | Listen port inside the container. |
+| `PORT` | `8788` | Listen port. The NAS deployment sets it to `80`. |
+| `DCN_LAN_IP` | `192.0.2.121` | Deploy script only — the container's macvlan address. |
 | `DCN_AUTH_PASSWORD` | _(unset)_ | If set, requires HTTP Basic auth (any username). |
 | `DCN_MAX_UPLOAD_BYTES` | 64 MiB | Upload size cap. |
 

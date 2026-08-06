@@ -5,6 +5,11 @@
 # build is enough load to wedge that box, and it has no `docker compose` anyway — so
 # the container is started with a plain `docker run`.
 #
+# Networking: the container gets its OWN LAN IP on the br0 macvlan network and binds
+# port 80 there. It has to be a low port — the work MacBook's security software blocks
+# outbound to high ports — and the NAS host's own 80/443 are already taken by the
+# Unraid webGUI and another service. A dedicated IP sidesteps both.
+#
 # Usage: scripts/deploy-nas.sh [ssh-host]
 
 set -euo pipefail
@@ -13,7 +18,8 @@ HOST="${1:-nas}"
 IMAGE="dcn-designer:latest"
 CONTAINER="dcn-designer"
 DATA_DIR="/mnt/user/appdata/dcn-designer"
-HOST_PORT="${DCN_HOST_PORT:-8789}"   # 8788 is taken by bookshelf-audio
+LAN_IP="${DCN_LAN_IP:-192.0.2.121}"
+LAN_PORT="${DCN_LAN_PORT:-80}"
 
 cd "$(dirname "$0")/.."
 
@@ -23,24 +29,27 @@ docker build -t "${IMAGE}" .
 echo "==> Shipping image to ${HOST}"
 docker save "${IMAGE}" | gzip -1 | ssh "${HOST}" 'gunzip | docker load'
 
-echo "==> Restarting container on ${HOST}"
+echo "==> Restarting container on ${HOST} at ${LAN_IP}:${LAN_PORT}"
 ssh "${HOST}" "set -e
   mkdir -p '${DATA_DIR}'
   docker rm -f '${CONTAINER}' >/dev/null 2>&1 || true
   docker run -d \
     --name '${CONTAINER}' \
     --restart unless-stopped \
-    -p ${HOST_PORT}:8788 \
+    --network br0 \
+    --ip '${LAN_IP}' \
     -v '${DATA_DIR}':/data \
     -e DCN_WORKSPACE=/data \
-    -e PORT=8788 \
+    -e PORT=${LAN_PORT} \
     ${DCN_AUTH_PASSWORD:+-e DCN_AUTH_PASSWORD='${DCN_AUTH_PASSWORD}'} \
     '${IMAGE}'"
 
+# Health is checked from here, not from the NAS: a macvlan container is deliberately
+# unreachable from its own host, so curling it over there would always fail.
 echo "==> Waiting for health"
 for _ in $(seq 1 20); do
-  if curl -fsS --max-time 5 "http://${HOST}:${HOST_PORT}/api/health" >/dev/null 2>&1; then
-    echo "==> Healthy: http://${HOST}:${HOST_PORT}/"
+  if curl -fsS --max-time 5 "http://${LAN_IP}:${LAN_PORT}/api/health" >/dev/null 2>&1; then
+    echo "==> Healthy: http://${LAN_IP}${LAN_PORT:+$([ "${LAN_PORT}" = 80 ] || echo ":${LAN_PORT}")}/"
     exit 0
   fi
   sleep 2

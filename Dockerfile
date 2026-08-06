@@ -32,7 +32,9 @@ EXPOSE 8788
 # Workspace lives on a bind mount so designs survive image rebuilds.
 VOLUME ["/data"]
 
+# Reads PORT at runtime rather than baking it in — the listen port is configurable and
+# the macvlan deployment overrides it to 80.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:8788/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8788)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "src/server/index.ts"]

@@ -1,18 +1,20 @@
+# Reference/portable definition. The NAS itself is deployed with scripts/deploy-nas.sh —
+# Unraid has no `docker compose`, and there the container needs its own macvlan LAN IP so
+# it can bind a low port (the work MacBook blocks outbound to high ports). See DEPLOY.md.
 services:
   dcn-designer:
     image: dcn-designer:latest
     container_name: dcn-designer
     restart: unless-stopped
     ports:
-      # LAN-reachable from any laptop on the network. Host port 8789 — 8788 is taken
-      # by bookshelf-audio on the NAS.
-      - "8789:8788"
+      # Low port so restrictive corporate egress rules allow it.
+      - "80:80"
     volumes:
       # Library + all projects. Survives image rebuilds; back this up.
-      - /mnt/user/appdata/dcn-designer:/data
+      - ./data:/data
     environment:
       - DCN_WORKSPACE=/data
-      - PORT=8788
+      - PORT=80
       # Uncomment to require a shared password (any username). Do this before
       # exposing the app beyond the LAN.
       # - DCN_AUTH_PASSWORD=change-me
