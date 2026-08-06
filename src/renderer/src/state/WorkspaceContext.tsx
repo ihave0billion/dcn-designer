@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { IS_WEB_BUILD } from '@/lib/runtime-target'
 
 const WORKSPACE_KEY = 'dcn-designer.workspace_path'
 const CURRENT_PROJECT_KEY = 'dcn-designer.current_project_path'
@@ -19,9 +20,35 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const stored = localStorage.getItem(WORKSPACE_KEY)
-    if (stored) setPathState(stored)
-    setReady(true)
+    let cancelled = false
+
+    async function boot(): Promise<void> {
+      if (IS_WEB_BUILD) {
+        // The server owns the workspace root and it is shared by every browser that
+        // connects, so adopt it instead of trusting this device's localStorage. Also
+        // means the first-run WorkspacePicker never has to appear on the web.
+        try {
+          const root = await window.dcn.defaultWorkspacePath()
+          if (cancelled) return
+          localStorage.setItem(WORKSPACE_KEY, root)
+          setPathState(root)
+          await window.dcn.ensureWorkspace(root)
+        } catch (e) {
+          console.error('workspace bootstrap failed', e)
+        }
+        if (!cancelled) setReady(true)
+        return
+      }
+
+      const stored = localStorage.getItem(WORKSPACE_KEY)
+      if (stored) setPathState(stored)
+      setReady(true)
+    }
+
+    void boot()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const setWorkspacePath = useCallback(async (path: string | null) => {

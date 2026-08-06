@@ -3,6 +3,7 @@ import { FolderOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useWorkspace } from '@/state/WorkspaceContext'
+import { IS_WEB_BUILD } from '@/lib/runtime-target'
 
 export function SettingsView() {
   const { workspacePath, setWorkspacePath } = useWorkspace()
@@ -37,10 +38,19 @@ export function SettingsView() {
                 {workspacePath || '(none)'}
               </code>
             </div>
-            <Button onClick={changeWorkspace} disabled={busy} variant="outline">
-              <FolderOpen />
-              {busy ? 'Choosing…' : 'Change workspace folder'}
-            </Button>
+            {IS_WEB_BUILD ? (
+              <p className="text-sm text-muted-foreground">
+                This workspace lives on the server and is shared by every browser that
+                connects, so it can't be changed from here. Point the server at a
+                different folder with the <code className="text-foreground">DCN_WORKSPACE</code>{' '}
+                environment variable.
+              </p>
+            ) : (
+              <Button onClick={changeWorkspace} disabled={busy} variant="outline">
+                <FolderOpen />
+                {busy ? 'Choosing…' : 'Change workspace folder'}
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>
