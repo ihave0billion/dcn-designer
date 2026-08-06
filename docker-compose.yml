@@ -1,0 +1,17 @@
+services:
+  dcn-designer:
+    image: dcn-designer:latest
+    container_name: dcn-designer
+    restart: unless-stopped
+    ports:
+      # LAN-reachable from any laptop on the network.
+      - "8788:8788"
+    volumes:
+      # Library + all projects. Survives image rebuilds; back this up.
+      - /mnt/user/appdata/dcn-designer:/data
+    environment:
+      - DCN_WORKSPACE=/data
+      - PORT=8788
+      # Uncomment to require a shared password (any username). Do this before
+      # exposing the app beyond the LAN.
+      # - DCN_AUTH_PASSWORD=change-me
