@@ -5,7 +5,7 @@ import { existsSync, promises as fs, createReadStream } from 'node:fs'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import AdmZip from 'adm-zip'
 import { handlers } from './dcn-handlers.ts'
-import { WORKSPACE_ROOT, UPLOAD_DIR } from './paths.ts'
+import { WORKSPACE_ROOT, UPLOAD_DIR, resolveInRoot } from './paths.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const WEB_ROOT = process.env.DCN_WEB_ROOT || join(here, '..', '..', 'out', 'web')
@@ -153,6 +153,17 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
       }
     }
     sendJson(res, 200, { path: projectRoot })
+    return
+  }
+
+  // Phase 9 — write a binary payload (a rendered PDF) to a workspace path. The
+  // JSON-RPC channel above would have to base64 the bytes; this takes the raw
+  // body instead. `resolveInRoot` jails the target exactly as the JSON handlers do.
+  if (url.pathname === '/api/write-binary' && req.method === 'PUT') {
+    const abs = resolveInRoot(url.searchParams.get('path') || '')
+    await fs.mkdir(dirname(abs), { recursive: true })
+    await fs.writeFile(abs, await readBody(req))
+    sendJson(res, 200, { path: abs })
     return
   }
 

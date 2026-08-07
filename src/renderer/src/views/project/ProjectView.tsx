@@ -9,6 +9,7 @@ import { DesignView } from './DesignView'
 import { RackView } from './RackView'
 import { LinksView } from './LinksView'
 import { TopologyView } from './TopologyView'
+import { ExportView } from './ExportView'
 
 export function ProjectView() {
   const { currentProjectPath, openProject } = useWorkspace()
@@ -104,9 +105,7 @@ export function ProjectView() {
             <TabsTrigger value="summary" disabled>
               Summary
             </TabsTrigger>
-            <TabsTrigger value="export" disabled>
-              Export
-            </TabsTrigger>
+            <TabsTrigger value="export">Export</TabsTrigger>
           </TabsList>
         </div>
         <TabsContent value="requirements" className="flex-1 min-h-0 m-0">
@@ -165,6 +164,17 @@ export function ProjectView() {
               onGoToDesign={() => setActiveTab('design')}
               onGoToRack={() => setActiveTab('rack')}
               onGoToLinks={() => setActiveTab('links')}
+            />
+          )}
+        </TabsContent>
+        <TabsContent value="export" className="flex-1 min-h-0 m-0">
+          {loading || !req ? (
+            <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+          ) : (
+            <ExportView
+              requirements={req}
+              projectPath={currentProjectPath}
+              onGoToDesign={() => setActiveTab('design')}
             />
           )}
         </TabsContent>

@@ -206,6 +206,49 @@ function registerIpc(): void {
     return result.filePath
   })
 
+  ipcMain.handle('dcn:write-binary-file', async (_e, filePath: string, data: Uint8Array) => {
+    await fs.mkdir(dirname(filePath), { recursive: true })
+    await fs.writeFile(filePath, Buffer.from(data))
+  })
+
+  ipcMain.handle('dcn:show-save-pdf-picker', async (_e, title: string, defaultName: string) => {
+    const result = await dialog.showSaveDialog({
+      title: title || 'Export PDF',
+      defaultPath: defaultName || 'export.pdf',
+      filters: [
+        { name: 'PDF', extensions: ['pdf'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || !result.filePath) return null
+    return result.filePath
+  })
+
+  ipcMain.handle('dcn:list-exports', async (_e, projectPath: string) => {
+    const exportsDir = join(projectPath, 'exports')
+    if (!existsSync(exportsDir)) return []
+    const entries = await fs.readdir(exportsDir, { withFileTypes: true })
+    const out: Array<{ name: string; path: string; size_bytes: number; created: string }> = []
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.pdf')) continue
+      const filePath = join(exportsDir, entry.name)
+      try {
+        const st = await fs.stat(filePath)
+        out.push({
+          name: entry.name,
+          path: filePath,
+          size_bytes: st.size,
+          created: st.mtime.toISOString()
+        })
+      } catch {
+        // skip unreadable export
+      }
+    }
+    // Newest first — the export list is a "what did I just produce" affordance.
+    out.sort((a, b) => b.created.localeCompare(a.created))
+    return out
+  })
+
   ipcMain.handle('dcn:list-optics', async (_e, workspacePath: string) => {
     const opticsDir = join(workspacePath, 'library', 'optics')
     if (!existsSync(opticsDir)) return []

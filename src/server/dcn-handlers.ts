@@ -3,7 +3,11 @@ import { fileURLToPath } from 'node:url'
 import { existsSync, promises as fs } from 'node:fs'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { WORKSPACE_ROOT, resolveInRoot } from './paths.ts'
-import type { DcnOpticsIndexEntry, DcnProjectListEntry } from '../preload/types.ts'
+import type {
+  DcnExportEntry,
+  DcnOpticsIndexEntry,
+  DcnProjectListEntry
+} from '../preload/types.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -157,6 +161,33 @@ export const handlers: Record<string, (...args: never[]) => unknown> = {
     const abs = resolveInRoot(filePath)
     await fs.mkdir(dirname(abs), { recursive: true })
     await fs.writeFile(abs, text, 'utf8')
+  },
+
+  // Phase 9 — PDF exports archived into the project's exports/ dir. The bytes
+  // themselves arrive over PUT /api/write-binary (JSON-RPC is a poor fit for a
+  // binary body); this handler only lists what landed.
+  'list-exports': async (projectPath: string): Promise<DcnExportEntry[]> => {
+    const exportsDir = join(resolveInRoot(projectPath), 'exports')
+    if (!existsSync(exportsDir)) return []
+    const entries = await fs.readdir(exportsDir, { withFileTypes: true })
+    const out: DcnExportEntry[] = []
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.pdf')) continue
+      const abs = join(exportsDir, entry.name)
+      try {
+        const st = await fs.stat(abs)
+        out.push({
+          name: entry.name,
+          path: abs,
+          size_bytes: st.size,
+          created: st.mtime.toISOString()
+        })
+      } catch {
+        // skip unreadable export
+      }
+    }
+    out.sort((a, b) => b.created.localeCompare(a.created))
+    return out
   },
 
   'list-optics': async (workspacePath: string): Promise<DcnOpticsIndexEntry[]> => {

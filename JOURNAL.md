@@ -24,6 +24,38 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-08-06 — Cable BOM assumes one global tray distance
+- `requirements.cable_tray_m` is a **single number for the whole design**, and
+  racks carry no coordinates — only a name, size, PDU budget, location string and
+  tags. So every cross-rack run costs the same (`tray + 3 m + 3 m`) whether the
+  racks are adjacent or at opposite ends of the hall.
+- Good enough for the v1 BOM (and the user can always override any link's
+  `length_m` by hand or via CSV, which always wins over the derivation), but it
+  will under-order for a wide row and over-order for adjacent cabinets.
+- **If this needs to get real:** the smallest useful upgrade is a per-rack
+  position (row + column, or an X/Y in metres) on `RackInventoryRow`, then a
+  distance matrix instead of a scalar. That's a schema change — worth doing only
+  if the user hits it on a real design.
+
+### 2026-08-06 — Switch library has no power or RU data at all
+- All 25 entries in `seed/switches.yaml` ship `ru: null` **and** `power_w: null`,
+  so every rack-space and power figure in the app — Rack View, the PDU budget
+  check, and now the PDF BOM — rests on `DEFAULT_RU = 1` and
+  `DEFAULT_SWITCH_POWER_W = 800`. A 2 RU spine is currently modelled as 1 RU.
+- Consequence: the PDU-budget validation (`RACK_OVER_PDU_BUDGET`) can only ever
+  fire against an estimate, and rack elevations are wrong for multi-RU chassis.
+- **Cheapest fix:** populate `ru` + `power_w` for the handful of models actually
+  used (the 400G spines and the common leaves) via the Library UI, which already
+  supports editing both. Not a code change. Worth doing before any PDF is shown
+  to a customer.
+
+### 2026-08-06 — Requirements racks table still defaults to 42 U
+- Phase 5b moved the rack default to **44 U** (industry-standard DC cabinet) in
+  the schema and in RackView's inline "+ Add rack". The **Requirements → Racks**
+  table still creates rows at **42 U** — noticed during the Phase 9 GUI pass.
+- Cosmetic and low-risk, but it means the two "add a rack" paths in the app
+  disagree. Fold into Phase 10 polish.
+
 ### 2026-06-03 — ensureWorkspace not re-run on app launch → silent empty library
 - **Symptom (hit live during user testing):** opening the app with a workspace
   path already in `localStorage` whose `library/` is missing or incomplete leaves
@@ -375,6 +407,68 @@ earlier interim commit was dropped before the recommit.
 ---
 
 ## Errors / failures and resolutions
+
+### 2026-08-06 — PDF export silently blocked by the app's own CSP (web build)
+- **Symptom:** clicking **Export PDF** in the web build did nothing. No file
+  appeared in `exports/`, and the button returned to idle with no error in the
+  UI. Only the browser console told the story:
+  `Connecting to 'data:application/octet-stream;base64,AGFzbQ…' violates the
+  following Content Security Policy directive: "connect-src 'self' ws:"`.
+- **Root cause:** `@react-pdf/renderer` ships its layout engine as
+  **WebAssembly inlined as a `data:` URI** and `fetch`es that URI at first use.
+  `src/renderer/index.html` set `connect-src 'self' ws:`, which permits neither
+  `data:` nor the wasm instantiation.
+- **Fix:** widened exactly two directives — `script-src 'self' 'wasm-unsafe-eval'`
+  and `connect-src 'self' ws: data: blob:` (plus `blob:` on `img-src`). Neither
+  admits remote code: `script-src` is still `'self'` only, and
+  `'wasm-unsafe-eval'` permits WebAssembly compilation, not `eval()`.
+- **Why the tests missed it:** the vitest suite renders the document in **Node**,
+  where there is no CSP at all — it happily produced valid PDF bytes the whole
+  time. Only the real browser enforces the policy. **Same lesson as the
+  2026-06-03 multi-pod bug: the logic layer being green says nothing about the
+  integration.** A GUI pass is not optional on this project.
+- **Note for the deployed container:** the policy lives in the bundled
+  `index.html`, so `scripts/deploy-nas.sh` ships the fix; there is no separate
+  server-side CSP header to update.
+
+### 2026-08-06 — One PDF, two different power totals
+- **Symptom:** in the first end-to-end export, the **Rack layout** page reported
+  `7,200 W` and `6,400 W` per rack while the **switch BOM** on the facing page
+  reported power as unknown for every row. Same document, same devices.
+- **Root cause:** `placeRacks` (`src/domain/rack.ts`) quietly substitutes
+  `DEFAULT_SWITCH_POWER_W = 800` when a model has no `power_w` — and **every one
+  of the 25 switches in `seed/switches.yaml` ships `power_w: null`** (N9K.md
+  doesn't carry the figure). So `rack.estimated_power_w` was a real number built
+  on an estimate, while my new `buildDeviceBom` reported the underlying null
+  honestly. Both were defensible alone; together they contradicted each other.
+- **Fix:** exported `DEFAULT_RU` / `DEFAULT_SWITCH_POWER_W` from the domain and
+  had `buildDeviceBom` use the **same** fallback, marking such rows
+  `power_estimated` so the report can print a `†` footnote naming the estimate.
+  Both pages now read 13,600 W.
+- **Lesson:** a silent default deep in the solver is fine until a *second*
+  consumer reports the same quantity. When adding a reporting surface, check what
+  the existing surfaces already claim about the same number.
+
+### 2026-08-06 — react-pdf layout traps that only show up by looking
+- Three defects passed every byte-level assertion (valid `%PDF-`, 6 pages,
+  `%%EOF`) and were obvious the moment the PDF was actually rendered to images:
+  1. **Overprinting text.** The page style set `lineHeight: 1.4`, tuned for 9 pt
+     body copy. Inherited by the 26 pt cover title, the glyphs were taller than
+     the line box and the customer name printed *through* the title. Fix: every
+     stacked text style declares its own `lineHeight`.
+  2. **Colliding table columns.** A right-aligned cell ends exactly where the
+     next left-aligned cell starts, so headers rendered `QTYNOTES`,
+     `LENGTHMEDIA`, `SPEEDOPTIC`. Fix: `paddingRight: 6` on every cell style as a
+     gutter.
+  3. **Mangled arrows.** The built-in PDF fonts are **WinAnsi**-encoded, which has
+     no `→` or `↔` — and the app uses both freely (solver note `Breakout 1×→4×`,
+     cable labels `spine-1:Eth1/1 ↔ leaf-1:Eth1/49`). They rendered as stray
+     glyphs. Fix: `lib/pdf/text.ts` transliterates (`→`→`->`, `↔`→`<->`, `≥`→`>=`,
+     …) and drops anything else outside the encoding rather than printing a wrong
+     glyph; applied to every string sourced from user data or solver output.
+- **Method worth repeating:** a temporary test that writes the rendered PDF to
+  disk, then reading it back as images. Byte assertions prove *validity*; only
+  looking proves *legibility*.
 
 ### 2026-06-03 — Multi-pod Topology/Links render a flat 2-spine fabric when no rack inventory is defined
 - **Symptom:** committing a multi-pod candidate (111-leaf ACI: 8 spines / 4 pods /

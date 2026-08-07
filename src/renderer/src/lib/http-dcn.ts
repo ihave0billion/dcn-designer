@@ -7,7 +7,12 @@
 // and are emulated here with ordinary browser file input / download — so every view
 // that calls them (SplashView, LinksView, OpticsUploadDialog) works unchanged.
 
-import type { DcnApi, DcnOpticsIndexEntry, DcnProjectListEntry } from '../../../preload/types'
+import type {
+  DcnApi,
+  DcnExportEntry,
+  DcnOpticsIndexEntry,
+  DcnProjectListEntry
+} from '../../../preload/types'
 
 /**
  * Marker prefix for "save" targets. showSaveCsvPicker can't return a real host path in
@@ -76,8 +81,8 @@ async function upload(endpoint: string, file: File): Promise<{ path: string; bas
   return { path: payload.path, basename: payload.basename ?? file.name }
 }
 
-function downloadText(filename: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
+function downloadBlob(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename
@@ -85,6 +90,10 @@ function downloadText(filename: string, text: string): void {
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+function downloadText(filename: string, text: string): void {
+  downloadBlob(filename, new Blob([text], { type: 'text/csv;charset=utf-8' }))
 }
 
 const httpDcn: DcnApi = {
@@ -135,6 +144,30 @@ const httpDcn: DcnApi = {
   },
 
   showSaveCsvPicker: async (_title, defaultName) => `${DOWNLOAD_PREFIX}${defaultName || 'export.csv'}`,
+
+  writeBinaryFile: async (filePath, data) => {
+    if (filePath.startsWith(DOWNLOAD_PREFIX)) {
+      downloadBlob(
+        filePath.slice(DOWNLOAD_PREFIX.length),
+        new Blob([data as BlobPart], { type: 'application/pdf' })
+      )
+      return
+    }
+    // Real workspace path — the server owns it, so PUT the bytes there.
+    const res = await fetch(`/api/write-binary?path=${encodeURIComponent(filePath)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: data as BodyInit
+    })
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(payload.error || `Write failed (${res.status})`)
+    }
+  },
+
+  showSavePdfPicker: async (_title, defaultName) => `${DOWNLOAD_PREFIX}${defaultName || 'export.pdf'}`,
+
+  listExports: (projectPath) => call<DcnExportEntry[]>('list-exports', projectPath),
 
   listOptics: (workspacePath) => call<DcnOpticsIndexEntry[]>('list-optics', workspacePath),
   deleteOptics: (workspacePath, switchId) => call<void>('delete-optics', workspacePath, switchId)

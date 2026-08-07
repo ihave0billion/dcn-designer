@@ -12,6 +12,13 @@ export interface DcnOpticsIndexEntry {
   optic_count: number
 }
 
+export interface DcnExportEntry {
+  name: string
+  path: string
+  size_bytes: number
+  created: string
+}
+
 export interface DcnApi {
   defaultWorkspacePath(): Promise<string>
   showWorkspacePicker(defaultPath: string): Promise<string | null>
@@ -28,6 +35,12 @@ export interface DcnApi {
   readTextFile(filePath: string): Promise<string>
   writeTextFile(filePath: string, text: string): Promise<void>
   showSaveCsvPicker(title: string, defaultName: string): Promise<string | null>
+  // Phase 9 — PDF export. Mirrors the CSV pair above, but for binary payloads.
+  // The web adapter has no host filesystem to save into, so its picker returns
+  // a `browser-download:` pseudo-path that writeBinaryFile turns into a download.
+  writeBinaryFile(filePath: string, data: Uint8Array): Promise<void>
+  showSavePdfPicker(title: string, defaultName: string): Promise<string | null>
+  listExports(projectPath: string): Promise<DcnExportEntry[]>
   listOptics(workspacePath: string): Promise<DcnOpticsIndexEntry[]>
   deleteOptics(workspacePath: string, switchId: string): Promise<void>
 }
