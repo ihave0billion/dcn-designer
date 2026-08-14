@@ -24,6 +24,25 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-08-14 — Library positioning updates (Sunnyvale ToR work)
+- **93180YC-FX3 now carries 1G** (`speed_options_g: [1, 10, 25]`): the data
+  sheet lists the SFP28 host ports as 1/10/25G; N9K.md had transcribed them as
+  25G-only. Both files corrected. A 1G tier can now select the FX3 as its leaf.
+- **SE1 (non-U) models marked "do not position"** in their `notes`
+  (N9336C-SE1, N9396Y12C-SE1, N9396T12C-SE1): E100 without the DPU is not worth
+  the premium — position the SE1U (integrated DPU) or a standard leaf instead.
+  Entries kept in the library (they're still orderable; `availability` enum has
+  no "not positioned" state) — the note is the flag.
+- **PENDING: does the 9348Y2C6D-SE1U support 1G on its SFP28 host ports?**
+  the user has asked the product manager (asked 2026-08-14). Library currently says
+  `[10, 25]`. When the answer lands: if yes, update `speed_options_g` to
+  `[1, 10, 25]` + note; if "planned", record the timeline in `notes`.
+- ⚠️ These are **seed** changes — `ensureWorkspace` copies seeds only when the
+  workspace file is missing, so the live NAS workspace
+  (`/mnt/user/appdata/dcn-designer`) still has the old `switches.yaml`. Update
+  it via the Library UI at http://192.0.2.121/ or overwrite the file when the
+  Phase 9 redeploy happens.
+
 ### 2026-08-06 — Cable BOM assumes one global tray distance
 - `requirements.cable_tray_m` is a **single number for the whole design**, and
   racks carry no coordinates — only a name, size, PDU budget, location string and

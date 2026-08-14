@@ -74,7 +74,8 @@
 	- ACI support is for Zone-Based Firewall or DCI , not ACI Leaf
 	- Integrated 800G DPU FW
 - N9K-C93180YC-FX3
-	- 48x 25G + 6 100G
+	- 48x 1/10/25G + 6x 40/100G
+	- (corrected 2026-08-14: data sheet lists the SFP28 host ports as 1/10/25G; originally transcribed here as 25G-only)
 	- ACI Leaf capable
 - N9K-C93108TC-FX3
 	- 48x  100M/1/10GT + 6x 40/100G QSFP28

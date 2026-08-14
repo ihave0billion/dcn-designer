@@ -133,7 +133,7 @@ switches:
     asic: "E100 (SE1)"
     availability: available
     available_from: null
-    notes: null
+    notes: "Do not position (2026-08-14): E100 without the DPU is not worth the premium. Position the SE1U (integrated DPU) or a standard leaf instead."
     data_sheet_url: null
     attachments: []
 
@@ -470,7 +470,7 @@ switches:
     asic: "E100 (SE1)"
     availability: available
     available_from: null
-    notes: null
+    notes: "Do not position (2026-08-14): E100 without the DPU is not worth the premium. Position the SE1U (integrated DPU) or a standard leaf instead."
     data_sheet_url: null
     attachments: []
 
@@ -510,7 +510,7 @@ switches:
     asic: "E100 (SE1)"
     availability: available
     available_from: null
-    notes: "Copper 10GBASE-T host ports."
+    notes: "Do not position (2026-08-14): E100 without the DPU is not worth the premium. Position the SE1U (integrated DPU) or a standard leaf instead. Copper 10GBASE-T host ports."
     data_sheet_url: null
     attachments: []
 
@@ -606,7 +606,7 @@ switches:
     primary:
       ports: 48
       speed_g: 25
-      speed_options_g: [10, 25]
+      speed_options_g: [1, 10, 25]
       naming_template: "Eth1/{1..48}"
     uplink:
       ports: 6
@@ -634,7 +634,7 @@ switches:
     asic: null
     availability: available
     available_from: null
-    notes: null
+    notes: "1G supported on the SFP28 host ports per data sheet (confirmed 2026-08-14). N9K.md originally transcribed these ports as 25G-only."
     data_sheet_url: null
     attachments: []
 
