@@ -37,11 +37,13 @@ next time we hit a similar shape of problem.
   the user has asked the product manager (asked 2026-08-14). Library currently says
   `[10, 25]`. When the answer lands: if yes, update `speed_options_g` to
   `[1, 10, 25]` + note; if "planned", record the timeline in `notes`.
-- ⚠️ These are **seed** changes — `ensureWorkspace` copies seeds only when the
-  workspace file is missing, so the live NAS workspace
-  (`/mnt/user/appdata/dcn-designer`) still has the old `switches.yaml`. Update
-  it via the Library UI at http://192.0.2.121/ or overwrite the file when the
-  Phase 9 redeploy happens.
+- **NAS workspace updated 2026-08-14:** the live workspace's
+  `library/switches.yaml` was replaced with the new seed over SSH (previous
+  file untouched since the 08-05 seeding — no user edits lost; backup left at
+  `switches.yaml.bak-2026-08-14`) and verified through the running app at
+  http://192.0.2.121/. Remember `ensureWorkspace` copies seeds only when the
+  workspace file is missing — future seed edits need the same manual step (or
+  the Library UI).
 
 ### 2026-08-06 — Cable BOM assumes one global tray distance
 - `requirements.cable_tray_m` is a **single number for the whole design**, and
