@@ -18,7 +18,10 @@ export function SplashView() {
     setLoading(true)
     try {
       const list = await window.dcn.listProjects(workspacePath)
-      setProjects(list)
+      // Most-recent first (PROJECT_PLAN splash spec); never-edited projects sink.
+      setProjects(
+        [...list].sort((a, b) => (b.last_edited ?? '').localeCompare(a.last_edited ?? ''))
+      )
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {

@@ -10,8 +10,11 @@ import type {
 // Defaults used when the library doesn't specify (N9K.md doesn't carry
 // ru / power_w for many models). Conservative-ish numbers; the user can
 // override per-switch in the library UI later.
-const DEFAULT_RU = 1
-const DEFAULT_SWITCH_POWER_W = 800
+// Exported so consumers that report power (the Phase 9 BOM) fall back to the
+// same figure the rack placement already used — otherwise one document can
+// show an estimated rack total alongside an "unknown" BOM total.
+export const DEFAULT_RU = 1
+export const DEFAULT_SWITCH_POWER_W = 800
 
 interface PendingDevice {
   device_id: string

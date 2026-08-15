@@ -1,0 +1,14 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": ["src/server/**/*", "src/preload/types.ts", "vite.web.config.ts"],
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    // The server runs straight off .ts via Node 26's native type stripping, so its
+    // imports carry explicit .ts extensions and nothing is ever emitted.
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  }
+}

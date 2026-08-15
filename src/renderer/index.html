@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws:" />
+    <!--
+      'wasm-unsafe-eval' + data: in connect-src are for the PDF export (Phase 9):
+      @react-pdf/renderer ships its layout engine as WebAssembly inlined as a
+      data: URI, so it needs to fetch that URI and instantiate the module.
+      Neither directive permits remote code — script-src stays 'self' only.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: data: blob:" />
     <title>DCN Designer</title>
   </head>
   <body>

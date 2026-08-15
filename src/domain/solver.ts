@@ -78,6 +78,10 @@ export function solve(
   context: SolverContext
 ): DesignResult {
   const warnings: SolverWarning[] = []
+  // Input-level warnings (tier math, unknown spine model, use-case rules).
+  // These are also fed to buildCandidates: a blocking error about the
+  // INPUTS invalidates every candidate, not just the canonical view.
+  const base_warnings: SolverWarning[] = []
 
   // ──────────────────────────────────────────────────────────────────
   // Per-tier math (v8 rules 8, 13)
@@ -87,6 +91,7 @@ export function solve(
     const r = computeTier(t, requirements.fabric.uplinks_per_leaf, context.switches)
     tierResults.push(r.result)
     warnings.push(...r.warnings)
+    base_warnings.push(...r.warnings)
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -96,12 +101,14 @@ export function solve(
     ? (context.switches.find((s) => s.id === requirements.fabric.spine_model_id) ?? null)
     : null
   if (requirements.fabric.spine_model_id && !spineSw) {
-    warnings.push({
+    const w: SolverWarning = {
       code: 'UNKNOWN_SPINE_MODEL',
       severity: 'error',
       message: `Spine model "${requirements.fabric.spine_model_id}" not found in the library.`,
       context: { spine_model_id: requirements.fabric.spine_model_id }
-    })
+    }
+    warnings.push(w)
+    base_warnings.push(w)
   }
   const spineComp = computeSpine(
     tierResults,
@@ -115,14 +122,14 @@ export function solve(
   // ──────────────────────────────────────────────────────────────────
   // Use-case enforcement (v8 rule 10 — 1:1 only on AI/HPC)
   // ──────────────────────────────────────────────────────────────────
-  warnings.push(
-    ...checkUseCaseConstraints(
-      requirements.fabric.use_case,
-      tierResults,
-      context.switches,
-      requirements.fabric.spine_model_id
-    )
+  const useCaseWarnings = checkUseCaseConstraints(
+    requirements.fabric.use_case,
+    tierResults,
+    context.switches,
+    requirements.fabric.spine_model_id
   )
+  warnings.push(...useCaseWarnings)
+  base_warnings.push(...useCaseWarnings)
 
   // ──────────────────────────────────────────────────────────────────
   // Rack placement
@@ -195,7 +202,8 @@ export function solve(
     fabric: requirements.fabric,
     breakout_pairs: context.breakout_pairs,
     switches: context.switches,
-    rack_inventory: deviceRacks
+    rack_inventory: deviceRacks,
+    base_warnings
   })
   warnings.push(...candidatesOut.fabric_warnings)
 

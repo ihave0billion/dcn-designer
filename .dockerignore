@@ -1,0 +1,13 @@
+node_modules
+out
+dist
+release
+.git
+.vite
+*.tsbuildinfo
+.playwright-mcp
+*.log
+*.xlsx
+Deliverables
+.claude
+AGENTS.md

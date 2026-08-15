@@ -10,6 +10,7 @@ import {
   XCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { SeverityBadge, StatusPill } from '@/components/design-status'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   AlertDialog,
@@ -68,7 +69,6 @@ import {
   type DesignResult,
   type IpnRouterSpec,
   type RackPlacement,
-  type SolverWarning,
   type WarningCode
 } from '@domain'
 
@@ -889,44 +889,6 @@ function Kv({
       </div>
       {note && <div className="text-xs text-muted-foreground">{note}</div>}
     </div>
-  )
-}
-
-function StatusPill({ valid }: { valid: boolean }) {
-  return valid ? (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 text-xs font-medium px-2.5 py-1">
-      <CheckCircle2 className="size-3.5" />
-      Design valid
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 text-destructive text-xs font-medium px-2.5 py-1">
-      <XCircle className="size-3.5" />
-      Design invalid
-    </span>
-  )
-}
-
-function SeverityBadge({ severity }: { severity: SolverWarning['severity'] }) {
-  if (severity === 'error') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded bg-destructive/10 text-destructive text-xs font-medium px-1.5 py-0.5">
-        <XCircle className="size-3" />
-        error
-      </span>
-    )
-  }
-  if (severity === 'warn') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 text-xs font-medium px-1.5 py-0.5">
-        <AlertTriangle className="size-3" />
-        warn
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center gap-1 rounded bg-muted text-muted-foreground text-xs font-medium px-1.5 py-0.5">
-      info
-    </span>
   )
 }
 

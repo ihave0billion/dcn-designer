@@ -21,6 +21,10 @@ const dcn: DcnApi = {
   writeTextFile: (filePath, text) => ipcRenderer.invoke('dcn:write-text-file', filePath, text),
   showSaveCsvPicker: (title, defaultName) =>
     ipcRenderer.invoke('dcn:show-save-csv-picker', title, defaultName),
+  writeBinaryFile: (filePath, data) => ipcRenderer.invoke('dcn:write-binary-file', filePath, data),
+  showSavePdfPicker: (title, defaultName) =>
+    ipcRenderer.invoke('dcn:show-save-pdf-picker', title, defaultName),
+  listExports: (projectPath) => ipcRenderer.invoke('dcn:list-exports', projectPath),
   listOptics: (workspacePath) => ipcRenderer.invoke('dcn:list-optics', workspacePath),
   deleteOptics: (workspacePath, switchId) =>
     ipcRenderer.invoke('dcn:delete-optics', workspacePath, switchId)

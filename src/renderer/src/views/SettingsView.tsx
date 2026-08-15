@@ -1,11 +1,14 @@
 import { useState } from 'react'
-import { FolderOpen } from 'lucide-react'
+import { FolderOpen, Moon, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useTheme } from '@/components/ThemeProvider'
 import { useWorkspace } from '@/state/WorkspaceContext'
+import { IS_WEB_BUILD } from '@/lib/runtime-target'
 
 export function SettingsView() {
   const { workspacePath, setWorkspacePath } = useWorkspace()
+  const { theme, setTheme } = useTheme()
   const [busy, setBusy] = useState(false)
 
   async function changeWorkspace() {
@@ -25,6 +28,31 @@ export function SettingsView() {
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <Card>
           <CardHeader>
+            <CardTitle className="text-base">Appearance</CardTitle>
+            <CardDescription>
+              Persisted per device, along with your workspace and last-open project.
+              Shortcut: <kbd className="rounded border bg-muted px-1 font-mono text-xs">t</kbd>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex gap-2">
+            <Button
+              variant={theme === 'light' ? 'default' : 'outline'}
+              onClick={() => setTheme('light')}
+            >
+              <Sun />
+              Light
+            </Button>
+            <Button
+              variant={theme === 'dark' ? 'default' : 'outline'}
+              onClick={() => setTheme('dark')}
+            >
+              <Moon />
+              Dark
+            </Button>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
             <CardTitle className="text-base">Workspace folder</CardTitle>
             <CardDescription>
               Holds your library (switches, servers, optics) and all projects.
@@ -37,10 +65,19 @@ export function SettingsView() {
                 {workspacePath || '(none)'}
               </code>
             </div>
-            <Button onClick={changeWorkspace} disabled={busy} variant="outline">
-              <FolderOpen />
-              {busy ? 'Choosing…' : 'Change workspace folder'}
-            </Button>
+            {IS_WEB_BUILD ? (
+              <p className="text-sm text-muted-foreground">
+                This workspace lives on the server and is shared by every browser that
+                connects, so it can't be changed from here. Point the server at a
+                different folder with the <code className="text-foreground">DCN_WORKSPACE</code>{' '}
+                environment variable.
+              </p>
+            ) : (
+              <Button onClick={changeWorkspace} disabled={busy} variant="outline">
+                <FolderOpen />
+                {busy ? 'Choosing…' : 'Change workspace folder'}
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>

@@ -721,7 +721,7 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                   {form.racks.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
-                        No racks yet. Solver will pick generic 42U racks until you add some.
+                        No racks yet. Solver will place everything in one logical rack until you add some.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -743,7 +743,7 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                             value={rack.size_u}
                             onChange={(e) =>
                               patchRack(setForm, idx, {
-                                size_u: Number(e.target.value) || 42
+                                size_u: Number(e.target.value) || 44
                               })
                             }
                           />
@@ -926,7 +926,7 @@ function addRack(setForm: React.Dispatch<React.SetStateAction<RequirementsFile>>
     ...prev,
     racks: [
       ...prev.racks,
-      { name: `Rack ${prev.racks.length + 1}`, size_u: 42, pdu_kw_budget: null, location: '', tags: [] }
+      { name: `Rack ${prev.racks.length + 1}`, size_u: 44, pdu_kw_budget: null, location: '', tags: [] }
     ]
   }))
 }

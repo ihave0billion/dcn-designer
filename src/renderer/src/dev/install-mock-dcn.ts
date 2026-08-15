@@ -153,6 +153,9 @@ export function installMockDcn(): void {
   // Generic plain-text files (Phase 6 — CSV export round-trip).
   const textFiles = new Map<string, string>()
 
+  // Binary files (Phase 9 — PDF export round-trip).
+  const binaryFiles = new Map<string, Uint8Array>()
+
   // Curated patch-panel library (mirrors seed/patch_panels.yaml).
   const patchPanels = {
     schema_version: 1,
@@ -382,6 +385,22 @@ export function installMockDcn(): void {
     },
     showSaveCsvPicker: async (_title, defaultName) =>
       `/mock-export/${defaultName || 'export.csv'}`,
+    writeBinaryFile: async (filePath, data) => {
+      binaryFiles.set(filePath, data)
+    },
+    showSavePdfPicker: async (_title, defaultName) =>
+      `/mock-export/${defaultName || 'export.pdf'}`,
+    listExports: async (projectPath) => {
+      const prefix = `${projectPath}/exports/`
+      return [...binaryFiles.entries()]
+        .filter(([path]) => path.startsWith(prefix) && path.endsWith('.pdf'))
+        .map(([path, bytes]) => ({
+          name: path.slice(prefix.length),
+          path,
+          size_bytes: bytes.byteLength,
+          created: new Date().toISOString()
+        }))
+    },
     listOptics: async () => {
       const out: DcnOpticsIndexEntry[] = []
       for (const [path, content] of opticsFiles) {

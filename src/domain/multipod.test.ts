@@ -428,6 +428,48 @@ describe('buildCandidates direct invocation (no full solve)', () => {
   })
 })
 
+describe('Phase 10 — input-level blocking errors invalidate every candidate', () => {
+  // Regression: a broken tier (e.g. a leaf with no uplink ports in the
+  // library) produced a top-level summary.valid=false but an all-valid
+  // candidate matrix — and the committed-candidate projection then
+  // overwrote the truthful verdict, so Summary/Design showed "valid"
+  // right next to an error-severity warning.
+  const requirements: SolverRequirements = {
+    fabric: {
+      uplinks_per_leaf: 4,
+      uplinks_per_spine: 2,
+      spine_model_id: 'N9K-C9364D-GX2A',
+      use_case: 'dcn',
+      input_mode: 'aggregate'
+    },
+    tiers: [
+      {
+        speed_tier_label: '100G',
+        endpoint_count: 400,
+        switch_count: null,
+        leaf_model_id: 'no-such-leaf',
+        override_uplink_speed_g: null
+      }
+    ]
+  }
+
+  const out = solve(requirements, context)
+
+  it('marks all four candidates invalid and carries the blocking error', () => {
+    expect(out.warnings.some((w) => w.code === 'UNKNOWN_LEAF_MODEL')).toBe(true)
+    expect(out.summary.valid).toBe(false)
+    for (const c of out.candidates) {
+      expect(c.valid).toBe(false)
+      expect(c.warnings.some((w) => w.code === 'UNKNOWN_LEAF_MODEL')).toBe(true)
+    }
+  })
+
+  it('keeps the committed candidate verdict consistent with the top-level summary', () => {
+    const committed = getCandidate(out.candidates, out.committed_candidate_id)
+    expect(committed.valid).toBe(out.summary.valid)
+  })
+})
+
 describe('Phase 9b — IPN rack placement + ACI pod tagging', () => {
   // Same 111-leaf fixture but with rack inventory so the multi-pod
   // candidates produce a placed rack_layout (IPN rack + pod_index).
