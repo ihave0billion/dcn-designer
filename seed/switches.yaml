@@ -562,7 +562,7 @@ switches:
     primary:
       ports: 48
       speed_g: 25
-      speed_options_g: [10, 25]
+      speed_options_g: [1, 10, 25]
       naming_template: "Eth1/{1..48}"
     uplink:
       ports: 6
@@ -594,7 +594,7 @@ switches:
     asic: "E100 (SE1U)"
     availability: available
     available_from: null
-    notes: "Integrated 800G DPU firewall."
+    notes: "Integrated 800G DPU firewall. 1G host ports supported via QSA adapter (PM-confirmed 2026-08-14)."
     data_sheet_url: null
     attachments: []
 

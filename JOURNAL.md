@@ -33,10 +33,11 @@ next time we hit a similar shape of problem.
   the premium — position the SE1U (integrated DPU) or a standard leaf instead.
   Entries kept in the library (they're still orderable; `availability` enum has
   no "not positioned" state) — the note is the flag.
-- **PENDING: does the 9348Y2C6D-SE1U support 1G on its SFP28 host ports?**
-  the user has asked the product manager (asked 2026-08-14). Library currently says
-  `[10, 25]`. When the answer lands: if yes, update `speed_options_g` to
-  `[1, 10, 25]` + note; if "planned", record the timeline in `notes`.
+- **RESOLVED same day: the 9348Y2C6D-SE1U DOES support 1G** — PM confirmed,
+  via a **QSA adapter**. `speed_options_g` updated to `[1, 10, 25]` + notes in
+  `seed/switches.yaml` and N9K.md; live NAS workspace updated over SSH (backup
+  `switches.yaml.bak-2026-08-14-se1u`) and verified through the running app.
+  The SE1U is now the modern single-box 1/10/25G ToR answer in the library.
 - **NAS workspace updated 2026-08-14:** the live workspace's
   `library/switches.yaml` was replaced with the new seed over SSH (previous
   file untouched since the 08-05 seeding — no user edits lost; backup left at

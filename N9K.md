@@ -70,7 +70,7 @@
 	- 48x 10/25/50G SFP56 + 4x 400G QSFP-DD
 	- ACI Leaf capable
 - N9348Y2C6D-SE1U
-	- 48x 25G + 2x 100G + 6x 400G
+	- 48x 1/10/25G + 2x 100G + 6x 400G (1G via QSA adapter — PM-confirmed 2026-08-14)
 	- ACI support is for Zone-Based Firewall or DCI , not ACI Leaf
 	- Integrated 800G DPU FW
 - N9K-C93180YC-FX3
