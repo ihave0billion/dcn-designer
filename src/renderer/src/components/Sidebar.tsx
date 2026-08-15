@@ -47,7 +47,10 @@ export function Sidebar({ activeId, onSelect }: SidebarProps) {
           )
         })}
       </nav>
-      <div className="p-3 border-t text-xs text-muted-foreground">v0.0.1 · phase 1</div>
+      <div className="p-3 border-t text-xs text-muted-foreground">
+        v1.0.0 ·{' '}
+        <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">?</kbd> shortcuts
+      </div>
     </aside>
   )
 }

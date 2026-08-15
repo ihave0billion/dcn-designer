@@ -3,13 +3,17 @@ import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useWorkspace } from '@/state/WorkspaceContext'
+import { isPlainShortcutKey } from '@/lib/shortcuts'
 import { RequirementsFileSchema, type RequirementsFile, emptyRequirements } from '@/schemas/project'
 import { RequirementsView } from './RequirementsView'
 import { DesignView } from './DesignView'
 import { RackView } from './RackView'
 import { LinksView } from './LinksView'
 import { TopologyView } from './TopologyView'
+import { SummaryView } from './SummaryView'
 import { ExportView } from './ExportView'
+
+const TAB_ORDER = ['requirements', 'design', 'rack', 'links', 'topology', 'summary', 'export']
 
 export function ProjectView() {
   const { currentProjectPath, openProject } = useWorkspace()
@@ -17,6 +21,29 @@ export function ProjectView() {
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<string>('requirements')
+
+  // Phase 10 — tab shortcuts: 1–7 jump, [ / ] cycle. Bare keys only, and
+  // never while typing (see lib/shortcuts.ts for the rationale).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!isPlainShortcutKey(e)) return
+      const digit = Number(e.key)
+      if (digit >= 1 && digit <= TAB_ORDER.length) {
+        setActiveTab(TAB_ORDER[digit - 1])
+      } else if (e.key === '[' || e.key === ']') {
+        setActiveTab((tab) => {
+          const i = TAB_ORDER.indexOf(tab)
+          const delta = e.key === ']' ? 1 : -1
+          return TAB_ORDER[(i + delta + TAB_ORDER.length) % TAB_ORDER.length]
+        })
+      } else {
+        return
+      }
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -102,9 +129,7 @@ export function ProjectView() {
             <TabsTrigger value="rack">Rack View</TabsTrigger>
             <TabsTrigger value="links">Links</TabsTrigger>
             <TabsTrigger value="topology">Topology</TabsTrigger>
-            <TabsTrigger value="summary" disabled>
-              Summary
-            </TabsTrigger>
+            <TabsTrigger value="summary">Summary</TabsTrigger>
             <TabsTrigger value="export">Export</TabsTrigger>
           </TabsList>
         </div>
@@ -164,6 +189,18 @@ export function ProjectView() {
               onGoToDesign={() => setActiveTab('design')}
               onGoToRack={() => setActiveTab('rack')}
               onGoToLinks={() => setActiveTab('links')}
+            />
+          )}
+        </TabsContent>
+        <TabsContent value="summary" className="flex-1 min-h-0 m-0">
+          {loading || !req ? (
+            <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+          ) : (
+            <SummaryView
+              requirements={req}
+              projectPath={currentProjectPath}
+              onGoToDesign={() => setActiveTab('design')}
+              onGoToExport={() => setActiveTab('export')}
             />
           )}
         </TabsContent>

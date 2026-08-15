@@ -39,13 +39,7 @@ export const handlers: Record<string, (...args: never[]) => unknown> = {
   'ensure-workspace': async (workspacePath: string) => {
     const root = resolveInRoot(workspacePath)
     const created: string[] = []
-    for (const sub of [
-      'library',
-      'library/optics',
-      'library/attachments',
-      'library/ccw_imports',
-      'projects'
-    ]) {
+    for (const sub of ['library', 'library/optics', 'library/attachments', 'projects']) {
       const p = join(root, sub)
       if (!existsSync(p)) {
         await fs.mkdir(p, { recursive: true })

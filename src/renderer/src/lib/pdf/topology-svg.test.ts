@@ -185,4 +185,51 @@ describe('layoutTopologyForPdf', () => {
       counts: { spine: 0, leaf: 0, ipn: 0 }
     })
   })
+
+  // Phase 10 — Open Risk #3: react-flow and the PDF consume the same
+  // extractTopology() graph, but nothing asserted the PDF layout keeps the
+  // graph intact. Pin it: every node renders exactly once, and every edge is
+  // accounted for — either as a device-pair line whose counts sum to the
+  // link total, or in the edges_omitted report. Nothing silently disappears.
+  describe('graph parity with extractTopology output', () => {
+    const nodes = [
+      node('ipn-1', 'ipn'),
+      node('spine-1', 'spine', 0),
+      node('spine-2', 'spine', 0),
+      node('leaf-1', 'leaf', 0),
+      node('leaf-2', 'leaf', 0),
+      node('leaf-3', 'leaf', 0)
+    ]
+    // Full mesh spine×leaf with 2 port-level links per pair (12 links, 6
+    // pairs) plus one spine↔IPN link per spine.
+    const links: TopologyEdge[] = []
+    for (const s of ['spine-1', 'spine-2']) {
+      for (const l of ['leaf-1', 'leaf-2', 'leaf-3']) {
+        links.push(edge(`${s}:${l}:a`, s, l), edge(`${s}:${l}:b`, s, l))
+      }
+      links.push(edge(`${s}:ipn`, s, 'ipn-1'))
+    }
+
+    it('renders every graph node exactly once', () => {
+      const g = graph(nodes, links)
+      const layout = layoutTopologyForPdf(g, { width: WIDTH })
+      expect(layout.nodes.map((n) => n.id).sort()).toEqual(g.nodes.map((n) => n.id).sort())
+    })
+
+    it('represents every link: pair-line counts sum to the graph edge total', () => {
+      const g = graph(nodes, links)
+      const layout = layoutTopologyForPdf(g, { width: WIDTH })
+      expect(layout.edges_omitted).toBeNull()
+      expect(layout.edges).toHaveLength(8) // 6 spine×leaf pairs + 2 spine↔IPN
+      const linksRepresented = layout.edges.reduce((a, e) => a + e.count, 0)
+      expect(linksRepresented).toBe(g.edges.length)
+    })
+
+    it('reports the full pair and link totals when edges are omitted', () => {
+      const g = graph(nodes, links)
+      const layout = layoutTopologyForPdf(g, { width: WIDTH, maxEdgePairs: 4 })
+      expect(layout.edges).toHaveLength(0)
+      expect(layout.edges_omitted).toEqual({ pairs: 8, links: g.edges.length })
+    })
+  })
 })

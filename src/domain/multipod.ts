@@ -287,6 +287,15 @@ export interface BuildCandidatesInput {
   breakout_pairs: BreakoutPair[]
   switches: SwitchSpec[]
   rack_inventory: RackInventoryEntry[]
+  /**
+   * Phase 10 — warnings raised before candidate construction (tier math,
+   * unknown spine model, use-case constraints). They describe the inputs,
+   * not a pod/breakout strategy, so any blocking error here invalidates
+   * every candidate. Without this, a broken tier left the matrix all-valid
+   * while the top-level summary said invalid — the committed-candidate
+   * projection then overwrote the truthful verdict.
+   */
+  base_warnings?: SolverWarning[]
 }
 
 export interface BuildCandidatesOutput {
@@ -305,13 +314,22 @@ export function buildCandidates(input: BuildCandidatesInput): BuildCandidatesOut
   const { tiers, spine_switch, ipn_router, fabric, breakout_pairs, switches, rack_inventory } =
     input
   const aci_multipod_allowed = fabric.aci_multipod_allowed !== false // default true
+  const base_blocking = (input.base_warnings ?? []).filter((w) => w.severity === 'error')
 
-  const candidates: DesignCandidate[] = [
+  let candidates: DesignCandidate[] = [
     buildSinglePodCandidate('single_no_breakout', false, tiers, spine_switch, fabric, breakout_pairs, switches, rack_inventory),
     buildSinglePodCandidate('single_with_breakout', true, tiers, spine_switch, fabric, breakout_pairs, switches, rack_inventory),
     buildMultiPodCandidate('multi_no_breakout', false, tiers, spine_switch, ipn_router, fabric, breakout_pairs, switches, rack_inventory, !aci_multipod_allowed),
     buildMultiPodCandidate('multi_with_breakout', true, tiers, spine_switch, ipn_router, fabric, breakout_pairs, switches, rack_inventory, !aci_multipod_allowed)
   ]
+
+  if (base_blocking.length > 0) {
+    candidates = candidates.map((c) => ({
+      ...c,
+      valid: false,
+      warnings: [...base_blocking, ...c.warnings]
+    }))
+  }
 
   const primary_candidate_id = pickPrimaryCandidate(candidates)
 

@@ -22,6 +22,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
 
+    // Phase 10 — pick up where the user left off: the current-project key has
+    // been written since Phase 1 but never read back. Restore it only when it
+    // still lives under the active workspace and still looks like a project.
+    async function restoreLastProject(root: string): Promise<void> {
+      const stored = localStorage.getItem(CURRENT_PROJECT_KEY)
+      if (!stored) return
+      if (!stored.startsWith(root)) return
+      try {
+        const exists = await window.dcn.fileExists(`${stored}/requirements.yaml`)
+        if (exists && !cancelled) setProjectState(stored)
+        if (!exists) localStorage.removeItem(CURRENT_PROJECT_KEY)
+      } catch {
+        // Leave the key in place — a transient read failure shouldn't forget
+        // the project; next launch retries.
+      }
+    }
+
     async function boot(): Promise<void> {
       if (IS_WEB_BUILD) {
         // The server owns the workspace root and it is shared by every browser that
@@ -33,6 +50,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           localStorage.setItem(WORKSPACE_KEY, root)
           setPathState(root)
           await window.dcn.ensureWorkspace(root)
+          await restoreLastProject(root)
         } catch (e) {
           console.error('workspace bootstrap failed', e)
         }
@@ -41,8 +59,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
 
       const stored = localStorage.getItem(WORKSPACE_KEY)
-      if (stored) setPathState(stored)
-      setReady(true)
+      if (stored) {
+        setPathState(stored)
+        await restoreLastProject(stored)
+      }
+      if (!cancelled) setReady(true)
     }
 
     void boot()

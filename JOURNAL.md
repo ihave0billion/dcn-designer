@@ -70,13 +70,6 @@ next time we hit a similar shape of problem.
   supports editing both. Not a code change. Worth doing before any PDF is shown
   to a customer.
 
-### 2026-08-06 — Requirements racks table still defaults to 42 U
-- Phase 5b moved the rack default to **44 U** (industry-standard DC cabinet) in
-  the schema and in RackView's inline "+ Add rack". The **Requirements → Racks**
-  table still creates rows at **42 U** — noticed during the Phase 9 GUI pass.
-- Cosmetic and low-risk, but it means the two "add a rack" paths in the app
-  disagree. Fold into Phase 10 polish.
-
 ### 2026-06-03 — ensureWorkspace not re-run on app launch → silent empty library
 - **Symptom (hit live during user testing):** opening the app with a workspace
   path already in `localStorage` whose `library/` is missing or incomplete leaves
@@ -342,6 +335,13 @@ next time we hit a similar shape of problem.
 
 ## Resolved (recent)
 
+### 2026-08-14 — Requirements racks table 42 U default → resolved (Phase 10)
+Both "add a rack" paths now agree on 44 U: the Requirements table's inline
+default and `|| 42` fallback were flipped to 44 (RequirementsView), matching
+the Phase 5b schema/RackView default. Empty-state copy also corrected — the
+solver builds one right-sized logical rack, it never picked "generic 42U
+racks". See the 2026-08-14 Session Log row.
+
 ### 2026-06-01 — Multi-Pod ACI: IPN router library source + curated model list (Phase 2b) → resolved
 Ship a **separate `seed/ipn_routers.yaml`** (not a `switches.yaml` `role: 'ipn'`
 enum) — Phase 2b had already created the file with one seed model; the library
@@ -428,6 +428,30 @@ earlier interim commit was dropped before the recommit.
 ---
 
 ## Errors / failures and resolutions
+
+### 2026-08-14 — Candidate matrix ignored input-level errors → "Design valid" beside an error row (Phase 10)
+- **Symptom (found live in the Phase 10 GUI pass):** with a leaf that declares
+  no uplink ports (`UNKNOWN_LEAF_MODEL`, severity error), the Design tab's
+  candidate cards all said **Valid**, and after the committed-candidate
+  projection wrote design.yaml, both Design and the new Summary tab showed the
+  **"Design valid"** pill directly above a table containing an error — a
+  self-contradiction on one screen.
+- **Root cause:** two verdict paths. Top-level `summary.valid` (Phase 2) counts
+  every blocking warning, including tier math. But `buildCandidates` (Phase 2b)
+  gave each candidate only `computeSpine` + rack-placement warnings — tier,
+  unknown-spine-model, and use-case warnings never reached the matrix, so a
+  design with broken INPUTS produced an all-valid matrix. Phase 9b's
+  `projectCommittedCandidate` then overwrote the truthful top-level summary
+  with the candidate's verdict.
+- **Fix:** `solve()` collects input-level warnings as `base_warnings` and passes
+  them into `buildCandidates`, which invalidates every candidate and prepends
+  the blockers when any input-level error exists (they describe the inputs, not
+  a pod/breakout strategy, so no candidate can escape them). Two regression
+  tests pin candidate-verdict ≡ summary-verdict.
+- **Lesson:** when a result is projected from one of several parallel verdicts,
+  every verdict path must consume the same blocking inputs — a "valid" flag
+  computed from a subset of the warnings WILL eventually be displayed next to
+  the full warning list.
 
 ### 2026-08-06 — PDF export silently blocked by the app's own CSP (web build)
 - **Symptom:** clicking **Export PDF** in the web build did nothing. No file

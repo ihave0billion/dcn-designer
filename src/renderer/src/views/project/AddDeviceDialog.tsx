@@ -30,7 +30,7 @@ export interface AddDeviceDialogProps {
   onAdd(devices: RackMappingDevice[]): void
 }
 
-type Tab = 'switch' | 'server' | 'ccw-switch' | 'ccw-server' | 'blank'
+type Tab = 'switch' | 'server' | 'blank'
 
 const BLANK_RU_OPTIONS = [1, 2, 4, 6, 10] as const
 
@@ -201,12 +201,6 @@ export function AddDeviceDialog({
           <TabsList>
             <TabsTrigger value="switch">Switch</TabsTrigger>
             <TabsTrigger value="server">Server</TabsTrigger>
-            <TabsTrigger value="ccw-switch" disabled>
-              CCW-Switch
-            </TabsTrigger>
-            <TabsTrigger value="ccw-server" disabled>
-              CCW-Server
-            </TabsTrigger>
             <TabsTrigger value="blank">Blank panel</TabsTrigger>
           </TabsList>
 
@@ -257,14 +251,6 @@ export function AddDeviceDialog({
               </div>
             </div>
           </TabsContent>
-
-          <TabsContent value="ccw-switch" className="pt-3">
-            <CcwStub />
-          </TabsContent>
-
-          <TabsContent value="ccw-server" className="pt-3">
-            <CcwStub />
-          </TabsContent>
         </Tabs>
 
         {/* Shared placement fields */}
@@ -313,12 +299,7 @@ export function AddDeviceDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={tab === 'ccw-switch' || tab === 'ccw-server'}
-          >
-            Add to {rackName}
-          </Button>
+          <Button onClick={handleSubmit}>Add to {rackName}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -391,17 +372,6 @@ function LibraryList({
           <div className="text-xs text-muted-foreground">{it.detail}</div>
         </button>
       ))}
-    </div>
-  )
-}
-
-function CcwStub() {
-  return (
-    <div className="rounded-md border border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/30 px-4 py-6 text-sm">
-      <div className="font-medium mb-1">CCW import — coming in Phase 8</div>
-      <p className="text-muted-foreground">
-        Cisco Commerce Workspace estimates will land in <code className="font-mono text-xs">library/ccw_imports/</code> and become selectable here once Phase 8 ships.
-      </p>
     </div>
   )
 }
