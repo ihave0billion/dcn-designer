@@ -178,6 +178,14 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
 
+  // Liveness probe stays open so the container HEALTHCHECK and the deploy
+  // script's wait loop work without the shared password. It reveals nothing
+  // beyond "up"; the workspace path is only included for authenticated callers.
+  if (url.pathname === '/api/health' && !authorized(req)) {
+    sendJson(res, 200, { ok: true })
+    return
+  }
+
   if (!authorized(req)) {
     res.writeHead(401, { 'www-authenticate': 'Basic realm="DCN Designer"' })
     res.end('Authentication required')
