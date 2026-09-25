@@ -24,6 +24,27 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-09-25 — v1.1 topology: layout files from the old engine, and headless react-flow
+
+**Legacy `topology_layout.yaml`.** The v1.0 view saved elk positions for 200-px port-handle
+boxes; v1.1 tiles are 100 × 96 in fixed tiers, so replaying those positions scatters the
+switches. Rather than migrate or delete user data, the schema gained an optional
+`generator` field (`nd-tiles-v1`). Files without it are loaded (so the "forked" state is
+still visible — the toolbar chip says *Old layout file ignored*) but their positions are not
+applied; the next drag or *Reset saved layout* replaces the file. Rule going forward: any
+time the tile geometry changes, bump the generator string.
+
+**react-flow needs a visible page.** While verifying through the laptop's automation Chrome
+the tiles rendered but no edges appeared and `fitView` did nothing. Cause: the window was
+occluded (`document.hidden === true`), so `requestAnimationFrame` and `ResizeObserver` never
+fired, and react-flow measures nodes through a `ResizeObserver` — `nodesInitialized` stayed
+false forever. `page.bringToFront()` fixed it instantly. Remember this before "debugging"
+missing edges in any headless/automated check: confirm `document.hidden` first.
+
+**Wide leaf rows.** 31 leaves in one row fit at ~0.33× zoom on a 1352-px canvas; readable
+once zoomed, and it is what ND does, but wrapping rows past ~24 leaves is a cheap future
+option in `layoutScene` (deferred — the user asked for horizontal expansion explicitly).
+
 ### 2026-08-14 — Library positioning updates (Sunnyvale ToR work)
 - **93180YC-FX3 now carries 1G** (`speed_options_g: [1, 10, 25]`): the data
   sheet lists the SFP28 host ports as 1/10/25G; N9K.md had transcribed them as

@@ -1,31 +1,43 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
+  BackgroundVariant,
   Handle,
   Position,
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
   useNodesState,
   useEdgesState,
+  useNodesInitialized,
   useReactFlow,
   type Node as RFNode,
   type Edge as RFEdge,
   type NodeTypes,
+  type EdgeTypes,
   type NodeProps,
-  type OnNodeDrag,
-  MarkerType
+  type EdgeProps,
+  type OnNodeDrag
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Cable, GitFork, RotateCcw, Maximize2, Loader2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription
-} from '@/components/ui/card'
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Globe,
+  Info,
+  Loader2,
+  Maximize2,
+  Minus,
+  Pencil,
+  Plus,
+  X
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,43 +56,64 @@ import {
   deleteTopologyLayout,
   type CableLinksFile
 } from '@/lib/library-io'
-import type { TopologyLayoutFile } from '@/schemas/topology-layout'
+import { TOPOLOGY_LAYOUT_GENERATOR, type TopologyLayoutFile } from '@/schemas/topology-layout'
 import type { DesignResult } from '@domain'
-import { extractTopology, type TopologyGraph, type TopologyNode } from '@/lib/topology-extractor'
 import {
-  autoLayout,
-  nodeDimensions,
-  type LaidOutPosition
-} from '@/lib/topology-elk-layout'
+  extractTopology,
+  type TopologyGraph,
+  type TopologyNode,
+  type TopologyEdge
+} from '@/lib/topology-extractor'
+import {
+  buildFabrics,
+  buildScene,
+  drillInto,
+  layoutScene,
+  matchesFilter,
+  parentLevel,
+  parseFilter,
+  sameLevel,
+  TILE_H,
+  TILE_W,
+  type HealthStatus,
+  type Orientation,
+  type Scene,
+  type SceneEdge,
+  type SceneLevel,
+  type SceneNode
+} from '@/lib/topology-hierarchy'
+import { cn } from '@/lib/utils'
 
 interface TopologyViewProps {
   projectPath: string
+  fabricName: string
   onGoToDesign(): void
   onGoToRack(): void
   onGoToLinks(): void
 }
 
-// React-flow node data shape — spread into RFNode<TopoNodeData>.
-interface TopoNodeData extends Record<string, unknown> {
-  topo: TopologyNode
+interface TileData extends Record<string, unknown> {
+  scene: SceneNode
+  dimmed: boolean
 }
 
-interface TopoEdgeData extends Record<string, unknown> {
-  speed_g: number
-  optic_id: string | null
-  patch_panel_id: string | null
-  length_m: number | null
-  sourcePort: string
-  targetPort: string
-  label: string
+interface FanEdgeData extends Record<string, unknown> {
+  scene: SceneEdge
+  index: number
+  siblings: number
+  showLabel: boolean
 }
+
+type TileNode = RFNode<TileData, 'tile'>
+type FanEdge = RFEdge<FanEdgeData, 'fan'>
 
 // ────────────────────────────────────────────────────────────────────
-// Inner component (must be inside <ReactFlowProvider>)
+// Canvas (inside <ReactFlowProvider>)
 // ────────────────────────────────────────────────────────────────────
 
 function TopologyCanvas({
   projectPath,
+  fabricName,
   onGoToDesign,
   onGoToRack,
   onGoToLinks
@@ -90,24 +123,26 @@ function TopologyCanvas({
   const [cableLinks, setCableLinks] = useState<CableLinksFile | null>(null)
   const [layoutFile, setLayoutFile] = useState<TopologyLayoutFile | null>(null)
   const [loading, setLoading] = useState(true)
-  const [autoLayoutBusy, setAutoLayoutBusy] = useState(false)
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  // View state
+  const [level, setLevel] = useState<SceneLevel>({ kind: 'fabrics' })
+  const [aggregate, setAggregate] = useState(true)
+  const [orientation, setOrientation] = useState<Orientation>('vertical')
+  const [filterText, setFilterText] = useState('')
+  const [editMode, setEditMode] = useState(false)
+  const [legendOpen, setLegendOpen] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false)
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<RFNode<TopoNodeData>>([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge<TopoEdgeData>>([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<TileNode>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<FanEdge>([])
+  const { fitView, zoomIn, zoomOut } = useReactFlow()
+  const nodesInitialized = useNodesInitialized()
 
-  const { fitView } = useReactFlow()
-
-  // Built once per (design, cable_links) pair — extractor is pure.
-  const graph: TopologyGraph = useMemo(() => {
-    if (!design) return { nodes: [], edges: [], orphanDeviceIds: [] }
-    return extractTopology(design, cableLinks?.links ?? [])
-  }, [design, cableLinks])
-
-  // ── Load on mount + every time the project path changes ──────────────
+  // ── Data ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!currentProjectPath) return
     let cancelled = false
@@ -141,334 +176,453 @@ function TopologyCanvas({
     }
   }, [currentProjectPath, projectPath])
 
-  // ── Apply graph + positions to react-flow nodes/edges ───────────────
-  // Whenever the extracted graph changes (or the layout file flips), we
-  // rebuild the react-flow models. If there's no layout file, we run
-  // elkjs and use those positions in-memory only (no auto-write — the
-  // file is only created on first user drag, mirroring Phase 5/6).
-  useEffect(() => {
-    let cancelled = false
-    if (graph.nodes.length === 0) {
-      setNodes([])
-      setEdges([])
-      return () => {
-        cancelled = true
-      }
-    }
+  const graph: TopologyGraph = useMemo(() => {
+    if (!design) return { nodes: [], edges: [], orphanDeviceIds: [] }
+    return extractTopology(design, cableLinks?.links ?? [])
+  }, [design, cableLinks])
 
-    const positionsFromFile = new Map<string, { x: number; y: number }>()
-    if (layoutFile) {
+  const fabrics = useMemo(() => buildFabrics(graph, fabricName), [graph, fabricName])
+
+  // If the level points at a fabric that no longer exists (design regen), pop up.
+  useEffect(() => {
+    if (level.kind !== 'fabrics' && !fabrics.some((f) => f.id === level.fabricId)) {
+      setLevel({ kind: 'fabrics' })
+    }
+  }, [fabrics, level])
+
+  const scene: Scene = useMemo(
+    () => buildScene(graph, fabrics, level, { aggregate }),
+    [graph, fabrics, level, aggregate]
+  )
+
+  const filterClauses = useMemo(() => parseFilter(filterText), [filterText])
+
+  // Positions: tier layout, overridden by the saved layout at device level.
+  const positions = useMemo(() => {
+    const auto = layoutScene(scene.nodes, orientation)
+    const usable = layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR
+    if (level.kind === 'devices' && layoutFile && usable && orientation === 'vertical') {
       for (const p of layoutFile.positions) {
-        positionsFromFile.set(p.device_id, { x: p.x, y: p.y })
+        if (auto.has(p.device_id)) auto.set(p.device_id, { x: p.x, y: p.y })
       }
     }
+    return auto
+  }, [scene.nodes, orientation, level, layoutFile])
 
-    const applyPositions = (positions: Map<string, { x: number; y: number }>) => {
-      if (cancelled) return
-      const deviceNodes: RFNode<TopoNodeData>[] = graph.nodes.map((n) => {
-        const pos = positions.get(n.id) ?? { x: 0, y: 0 }
-        return {
-          id: n.id,
-          type:
-            n.role === 'spine' ? 'spineNode' : n.role === 'ipn' ? 'ipnNode' : 'leafNode',
-          position: pos,
-          data: { topo: n }
-        }
-      })
-      // Pod boundary backdrops (multi-pod only) sit behind the device
-      // nodes so each pod reads as a soft labeled region.
-      const boundaryNodes = computePodBoundaries(graph.nodes, positions)
-      const rfNodes = [...boundaryNodes, ...deviceNodes]
-      const rfEdges: RFEdge<TopoEdgeData>[] = graph.edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        sourceHandle: `out:${e.sourcePort}`,
-        target: e.target,
-        targetHandle: `in:${e.targetPort}`,
-        type: 'smoothstep',
-        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
-        data: {
-          speed_g: e.speed_g,
-          optic_id: e.optic_id,
-          patch_panel_id: e.patch_panel_id,
-          length_m: e.length_m,
-          sourcePort: e.sourcePort,
-          targetPort: e.targetPort,
-          label: e.label
-        },
-        label: `${e.speed_g}G`,
-        labelStyle: { fontSize: 10, fontWeight: 600 },
-        labelBgStyle: { fill: 'var(--background)', fillOpacity: 0.85 },
-        labelBgPadding: [4, 2],
-        labelBgBorderRadius: 4,
-        animated: false,
-        style: { strokeWidth: 1.5 }
-      }))
-      setNodes(rfNodes)
-      setEdges(rfEdges)
-      // Defer fit until after layout commit
-      requestAnimationFrame(() => {
-        if (!cancelled) fitView({ padding: 0.15, duration: 250 })
-      })
-    }
-
-    if (positionsFromFile.size > 0) {
-      applyPositions(positionsFromFile)
-      return () => {
-        cancelled = true
-      }
-    }
-
-    // Fallback: run elkjs in the background
-    autoLayout(graph)
-      .then((laid) => {
-        const m = new Map<string, { x: number; y: number }>()
-        for (const p of laid.positions) m.set(p.device_id, { x: p.x, y: p.y })
-        applyPositions(m)
-      })
-      .catch((e) => {
-        if (!cancelled) setErr(e instanceof Error ? e.message : String(e))
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [graph, layoutFile, fitView, setNodes, setEdges])
-
-  // ── Persist on drag stop ─────────────────────────────────────────────
-  const persistPositions = useCallback(
-    async (currentNodes: RFNode<TopoNodeData>[]) => {
-      try {
-        const positions: LaidOutPosition[] = currentNodes
-          .filter((n) => n.data?.topo) // drop pod-boundary backdrops
-          .map((n) => {
-            const dim = nodeDimensions(n.data.topo)
-            return { device_id: n.id, x: n.position.x, y: n.position.y, ...dim }
-          })
-        const now = new Date().toISOString()
-        const next: TopologyLayoutFile = {
-          schema_version: 1,
-          source: 'user',
-          seeded_at: layoutFile?.seeded_at ?? now,
-          forked_at: layoutFile?.forked_at ?? now,
-          positions: positions.map(({ device_id, x, y }) => ({ device_id, x, y }))
-        }
-        await saveTopologyLayout(projectPath, next)
-        setLayoutFile(next)
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e))
-      }
-    },
-    [layoutFile, projectPath]
-  )
-
-  // Avoid persisting on every micro-move; flush when the drag ends.
-  const onNodeDragStop: OnNodeDrag<RFNode<TopoNodeData>> = useCallback(
-    (_event, _node, dragged) => {
-      // dragged is the array of all nodes currently being dragged. We
-      // persist the entire `nodes` snapshot so unrelated nodes keep their
-      // positions too.
-      void dragged
-      // Use the most-recent node positions from react-flow's state.
-      void persistPositions(nodesRef.current)
-    },
-    [persistPositions]
-  )
-
-  // Keep a ref of latest nodes so onNodeDragStop sees the post-move state.
-  const nodesRef = useRef(nodes)
+  // ── Scene → react-flow ──────────────────────────────────────────────
   useEffect(() => {
-    nodesRef.current = nodes
-  }, [nodes])
-
-  // ── Reset to auto-layout ─────────────────────────────────────────────
-  const handleReset = useCallback(async () => {
-    setResetConfirmOpen(false)
-    setAutoLayoutBusy(true)
-    try {
-      await deleteTopologyLayout(projectPath)
-      setLayoutFile(null) // triggers the layout effect to re-run elkjs
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setAutoLayoutBusy(false)
-    }
-  }, [projectPath])
-
-  // ── Re-run auto-layout (without resetting fork state) ────────────────
-  // For users who have forked but want to re-run elk on the current graph
-  // and keep iterating from there. Persists immediately as 'user'.
-  const handleRunAutoLayout = useCallback(async () => {
-    if (!design || graph.nodes.length === 0) return
-    setAutoLayoutBusy(true)
-    try {
-      const laid = await autoLayout(graph)
-      const positionMap = new Map<string, { x: number; y: number }>()
-      for (const p of laid.positions) positionMap.set(p.device_id, { x: p.x, y: p.y })
-      setNodes((prev) => {
-        const devices = prev
-          .filter((n) => n.data?.topo)
-          .map((n) => ({ ...n, position: positionMap.get(n.id) ?? n.position }))
-        const boundaries = computePodBoundaries(graph.nodes, positionMap)
-        return [...boundaries, ...devices]
+    const vertical = orientation === 'vertical'
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+    const isDimmed = (n: SceneNode): boolean => {
+      if (filterClauses.length === 0) return false
+      return !n.memberIds.some((id) => {
+        const dev = byId.get(id)
+        return dev ? matchesFilter(dev, filterClauses) : false
       })
-      // Persist after a tick so nodesRef sees the new state.
-      requestAnimationFrame(() => {
-        void persistPositions(nodesRef.current)
-        fitView({ padding: 0.15, duration: 300 })
-      })
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setAutoLayoutBusy(false)
     }
-  }, [design, graph, setNodes, persistPositions, fitView])
+    const rfNodes: TileNode[] = scene.nodes.map((n) => ({
+      id: n.id,
+      type: 'tile',
+      position: positions.get(n.id) ?? { x: 0, y: 0 },
+      data: { scene: n, dimmed: isDimmed(n) },
+      draggable: editMode && level.kind === 'devices' && n.kind === 'device',
+      sourcePosition: vertical ? Position.Bottom : Position.Right,
+      targetPosition: vertical ? Position.Top : Position.Left,
+      width: TILE_W,
+      height: TILE_H
+    }))
 
-  // ── Selection handlers ──────────────────────────────────────────────
-  const onNodeClick = useCallback((_evt: React.MouseEvent, n: RFNode<TopoNodeData>) => {
+    // Parallel (non-aggregated) cables between the same pair fan out.
+    const siblings = new Map<string, number>()
+    for (const e of scene.edges) {
+      const k = `${e.source}|${e.target}`
+      siblings.set(k, (siblings.get(k) ?? 0) + 1)
+    }
+    const seen = new Map<string, number>()
+    const rfEdges: FanEdge[] = scene.edges.map((e) => {
+      const k = `${e.source}|${e.target}`
+      const index = seen.get(k) ?? 0
+      seen.set(k, index + 1)
+      return {
+        id: e.id,
+        type: 'fan',
+        source: e.source,
+        target: e.target,
+        data: { scene: e, index, siblings: siblings.get(k) ?? 1, showLabel: e.count > 1 }
+      }
+    })
+    setNodes(rfNodes)
+    setEdges(rfEdges)
+  }, [scene, positions, orientation, editMode, level, filterClauses, graph.nodes, setNodes, setEdges])
+
+  // Frame the graph whenever the level or orientation changes — once the
+  // new tiles have been measured, otherwise fitView sees an empty bounds.
+  const frameKey = `${level.kind}:${level.kind === 'fabrics' ? '' : level.fabricId}:${orientation}`
+  useEffect(() => {
+    if (!nodesInitialized) return
+    const t = window.setTimeout(
+      () => fitView({ padding: 0.12, duration: 300, maxZoom: 1.25 }),
+      20
+    )
+    return () => window.clearTimeout(t)
+  }, [frameKey, nodesInitialized, fitView])
+
+  // ── Navigation ──────────────────────────────────────────────────────
+  const goTo = useCallback((next: SceneLevel) => {
+    setLevel((cur) => (sameLevel(cur, next) ? cur : next))
+    setSelectedNodeId(null)
+    setSelectedEdgeId(null)
+  }, [])
+
+  const goUp = useCallback(() => {
+    const p = parentLevel(level)
+    if (p) goTo(p)
+  }, [level, goTo])
+
+  const onNodeDoubleClick = useCallback(
+    (_e: React.MouseEvent, n: TileNode) => {
+      const next = drillInto(n.data.scene, level)
+      if (next) goTo(next)
+    },
+    [level, goTo]
+  )
+
+  // Double-clicking empty canvas folds one level back up.
+  const onCanvasDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      const el = e.target as HTMLElement
+      if (el.classList.contains('react-flow__pane')) goUp()
+    },
+    [goUp]
+  )
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (legendOpen) setLegendOpen(false)
+      else if (actionsOpen) setActionsOpen(false)
+      else if (selectedNodeId || selectedEdgeId) {
+        setSelectedNodeId(null)
+        setSelectedEdgeId(null)
+      } else goUp()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [goUp, legendOpen, actionsOpen, selectedNodeId, selectedEdgeId])
+
+  // ── Selection ───────────────────────────────────────────────────────
+  const onNodeClick = useCallback((_e: React.MouseEvent, n: TileNode) => {
     setSelectedNodeId(n.id)
     setSelectedEdgeId(null)
   }, [])
-  const onEdgeClick = useCallback((_evt: React.MouseEvent, e: RFEdge<TopoEdgeData>) => {
+  const onEdgeClick = useCallback((_e: React.MouseEvent, e: FanEdge) => {
     setSelectedEdgeId(e.id)
     setSelectedNodeId(null)
   }, [])
   const onPaneClick = useCallback(() => {
     setSelectedNodeId(null)
     setSelectedEdgeId(null)
+    setActionsOpen(false)
   }, [])
 
   const selectedNode = useMemo(
-    () => (selectedNodeId ? graph.nodes.find((n) => n.id === selectedNodeId) ?? null : null),
-    [selectedNodeId, graph.nodes]
+    () => (selectedNodeId ? scene.nodes.find((n) => n.id === selectedNodeId) ?? null : null),
+    [selectedNodeId, scene.nodes]
   )
   const selectedEdge = useMemo(
-    () => (selectedEdgeId ? graph.edges.find((e) => e.id === selectedEdgeId) ?? null : null),
-    [selectedEdgeId, graph.edges]
+    () => (selectedEdgeId ? scene.edges.find((e) => e.id === selectedEdgeId) ?? null : null),
+    [selectedEdgeId, scene.edges]
   )
 
-  // ── Memoized node types so react-flow doesn't recreate them ─────────
-  const nodeTypes: NodeTypes = useMemo(
-    () => ({
-      spineNode: SpineNodeRenderer,
-      leafNode: LeafNodeRenderer,
-      ipnNode: IpnNodeRenderer,
-      podBoundary: PodBoundaryRenderer
-    }),
-    []
-  )
+  // ── Freeform layout persistence (device level only) ────────────────
+  const nodesRef = useRef(nodes)
+  useEffect(() => {
+    nodesRef.current = nodes
+  }, [nodes])
+
+  const persistPositions = useCallback(async () => {
+    try {
+      const now = new Date().toISOString()
+      const kept = new Map<string, { x: number; y: number }>()
+      // Positions from the old (v1.0) layout engine are a different geometry — drop them.
+      if (layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR) {
+        for (const p of layoutFile.positions) kept.set(p.device_id, { x: p.x, y: p.y })
+      }
+      for (const n of nodesRef.current) {
+        if (n.data.scene.kind === 'device') kept.set(n.id, { x: n.position.x, y: n.position.y })
+      }
+      const next: TopologyLayoutFile = {
+        schema_version: 1,
+        source: 'user',
+        seeded_at: layoutFile?.seeded_at ?? now,
+        forked_at: layoutFile?.forked_at ?? now,
+        positions: [...kept.entries()].map(([device_id, p]) => ({ device_id, x: p.x, y: p.y })),
+        generator: TOPOLOGY_LAYOUT_GENERATOR
+      }
+      await saveTopologyLayout(projectPath, next)
+      setLayoutFile(next)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }, [layoutFile, projectPath])
+
+  const onNodeDragStop: OnNodeDrag<TileNode> = useCallback(() => {
+    void persistPositions()
+  }, [persistPositions])
+
+  const handleResetLayout = useCallback(async () => {
+    setResetConfirmOpen(false)
+    try {
+      await deleteTopologyLayout(projectPath)
+      setLayoutFile(null)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }, [projectPath])
+
+  const nodeTypes: NodeTypes = useMemo(() => ({ tile: TileRenderer }), [])
+  const edgeTypes: EdgeTypes = useMemo(() => ({ fan: FanEdgeRenderer }), [])
 
   // ── Render ──────────────────────────────────────────────────────────
   if (loading) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading topology…</div>
+    return (
+      <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
+        <Loader2 className="size-4 animate-spin" /> Loading topology…
+      </div>
+    )
   }
-  if (!design) {
-    return <NoDesignState onGoToDesign={onGoToDesign} />
-  }
-  if (graph.nodes.length === 0) {
-    return <EmptyTopologyState onGoToDesign={onGoToDesign} />
-  }
+  if (!design) return <NoDesignState onGoToDesign={onGoToDesign} />
+  if (graph.nodes.length === 0) return <EmptyTopologyState onGoToDesign={onGoToDesign} />
 
+  const spineCount = graph.nodes.filter((n) => n.role === 'spine').length
+  const leafCount = graph.nodes.filter((n) => n.role === 'leaf').length
   const isForked = layoutFile?.source === 'user'
-  const linkCount = graph.edges.length
+  const legacyLayout = isForked && layoutFile?.generator !== TOPOLOGY_LAYOUT_GENERATOR
+  const canGoUp = parentLevel(level) !== null
+  const detailOpen = !!(selectedNode || selectedEdge)
 
   return (
     <div className="h-full flex flex-col min-h-0">
-      {/* Action bar */}
-      <div className="border-b bg-muted/30 px-6 py-3 flex items-center gap-3 flex-wrap">
-        <ForkStatusPill isForked={isForked} />
-        <span className="text-xs text-muted-foreground">
-          {graph.nodes.length} node{graph.nodes.length === 1 ? '' : 's'} · {linkCount} link
-          {linkCount === 1 ? '' : 's'}
+      {/* Breadcrumb row */}
+      <div className="px-6 pt-3 pb-2 flex items-center gap-2 flex-wrap">
+        <nav className="flex items-center gap-1 text-sm">
+          {scene.breadcrumb.map((c, i) => {
+            const last = i === scene.breadcrumb.length - 1
+            return (
+              <span key={c.label + i} className="flex items-center gap-1">
+                {i > 0 && <ChevronRight className="size-3.5 text-muted-foreground" />}
+                {last ? (
+                  <span className="font-semibold">{c.label}</span>
+                ) : (
+                  <button
+                    className="text-muted-foreground hover:text-foreground cursor-pointer"
+                    onClick={() => goTo(c.level)}
+                  >
+                    {c.label}
+                  </button>
+                )}
+              </span>
+            )
+          })}
+        </nav>
+        <span className="text-xs text-muted-foreground ml-2">
+          {spineCount} spine{spineCount === 1 ? '' : 's'} · {leafCount} lea
+          {leafCount === 1 ? 'f' : 'ves'} · {graph.edges.length} link
+          {graph.edges.length === 1 ? '' : 's'}
         </span>
         {graph.orphanDeviceIds.length > 0 && (
-          <span className="text-xs text-amber-700 dark:text-amber-300">
-            {graph.orphanDeviceIds.length} orphan
-            {graph.orphanDeviceIds.length === 1 ? '' : 's'}
-          </span>
+          <StatusChip status="minor">
+            {graph.orphanDeviceIds.length} orphan{graph.orphanDeviceIds.length === 1 ? '' : 's'}
+          </StatusChip>
+        )}
+        {isForked && !legacyLayout && <StatusChip status="unknown">Custom layout</StatusChip>}
+        {legacyLayout && (
+          <StatusChip status="unknown">Old layout file ignored — drag or reset to replace</StatusChip>
         )}
         <div className="flex-1" />
-        <Button variant="outline" size="sm" onClick={() => fitView({ padding: 0.15, duration: 200 })}>
-          <Maximize2 />
-          Fit view
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRunAutoLayout}
-          disabled={autoLayoutBusy}
-        >
-          {autoLayoutBusy ? <Loader2 className="animate-spin" /> : null}
-          Auto-layout
-        </Button>
-        {isForked && (
+        <div className="inline-flex rounded-md border text-xs overflow-hidden">
+          <span className="px-2.5 py-1 bg-accent text-accent-foreground font-medium border-r">
+            Design status
+          </span>
+          <span className="px-2.5 py-1 text-muted-foreground">
+            {aggregate ? 'Aggregated links' : 'Per-cable links'}
+          </span>
+        </div>
+      </div>
+
+      {/* Filter + Actions row */}
+      <div className="px-6 pb-3 flex items-center gap-2 relative">
+        <Input
+          value={filterText}
+          onChange={(e) => setFilterText(e.target.value)}
+          placeholder="Filter by attributes — e.g. model=N9K-C93, rack contains R1, leaf 3"
+          className="h-9"
+        />
+        <div className="relative">
           <Button
-            variant="outline"
             size="sm"
-            onClick={() => setResetConfirmOpen(true)}
-            disabled={autoLayoutBusy}
+            className="h-9"
+            onClick={() => setActionsOpen((v) => !v)}
+            aria-expanded={actionsOpen}
           >
-            <RotateCcw />
-            Reset to auto-layout
+            Actions
+            <ChevronDown className={cn('transition-transform', actionsOpen && 'rotate-180')} />
           </Button>
-        )}
+          {actionsOpen && (
+            <ActionsMenu
+              onClose={() => setActionsOpen(false)}
+              orientation={orientation}
+              onOrientation={setOrientation}
+              aggregate={aggregate}
+              onAggregate={setAggregate}
+              editMode={editMode}
+              onEditMode={setEditMode}
+              canReset={isForked}
+              onReset={() => setResetConfirmOpen(true)}
+              onExpandAll={() => {
+                const f = level.kind === 'fabrics' ? fabrics[0] : fabrics.find((x) => x.id === level.fabricId)
+                if (f) goTo({ kind: 'devices', fabricId: f.id })
+              }}
+              onCollapse={() => goTo({ kind: 'fabrics' })}
+              onFit={() => fitView({ padding: 0.12, duration: 250 })}
+              onLegend={() => setLegendOpen(true)}
+            />
+          )}
+        </div>
       </div>
 
       {err && (
-        <div className="border-b bg-destructive/10 text-destructive px-6 py-2 text-sm">
-          {err}
-        </div>
+        <div className="border-y bg-destructive/10 text-destructive px-6 py-2 text-sm">{err}</div>
       )}
 
-      {/* Body: 3-col grid — canvas + properties panel */}
-      <div className="flex-1 grid min-h-0" style={{ gridTemplateColumns: '1fr 320px' }}>
-        <div className="relative border-r min-h-0">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeDragStop={onNodeDragStop}
-            onNodeClick={onNodeClick}
-            onEdgeClick={onEdgeClick}
-            onPaneClick={onPaneClick}
-            fitView
-            minZoom={0.2}
-            maxZoom={2}
-            proOptions={{ hideAttribution: true }}
+      {/* Canvas */}
+      <div
+        className="flex-1 relative min-h-0 border-t overflow-hidden"
+        onDoubleClick={onCanvasDoubleClick}
+      >
+        <ReactFlow<TileNode, FanEdge>
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeClick={onNodeClick}
+          onNodeDoubleClick={onNodeDoubleClick}
+          onEdgeClick={onEdgeClick}
+          onPaneClick={onPaneClick}
+          onNodeDragStop={onNodeDragStop}
+          nodesConnectable={false}
+          zoomOnDoubleClick={false}
+          minZoom={0.08}
+          maxZoom={2.5}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--canvas-grid)" />
+        </ReactFlow>
+
+        {/* ND-style control stack */}
+        <div className="absolute bottom-4 right-4 flex flex-col rounded-md border bg-card shadow-sm overflow-hidden">
+          <CtrlButton title="Up one level (Esc)" onClick={goUp} disabled={!canGoUp}>
+            <ChevronUp />
+          </CtrlButton>
+          <CtrlButton title="Zoom in" onClick={() => zoomIn({ duration: 150 })}>
+            <Plus />
+          </CtrlButton>
+          <CtrlButton title="Zoom out" onClick={() => zoomOut({ duration: 150 })}>
+            <Minus />
+          </CtrlButton>
+          <CtrlButton title="Fit view" onClick={() => fitView({ padding: 0.12, duration: 250 })}>
+            <Maximize2 />
+          </CtrlButton>
+          <CtrlButton
+            title={editMode ? 'Freeform layout on — click to lock' : 'Edit layout (drag switches)'}
+            active={editMode}
+            onClick={() => setEditMode((v) => !v)}
           >
-            <Background gap={24} size={1} />
-            <Controls position="bottom-right" showInteractive={false} />
-          </ReactFlow>
+            <Pencil />
+          </CtrlButton>
+          <CtrlButton title="Legend" active={legendOpen} onClick={() => setLegendOpen((v) => !v)}>
+            <Info />
+          </CtrlButton>
         </div>
-        <div className="overflow-auto p-4">
-          {selectedNode ? (
-            <NodePropertiesPanel
-              node={selectedNode}
-              onGoToRack={onGoToRack}
-              onGoToLinks={onGoToLinks}
-            />
-          ) : selectedEdge ? (
-            <EdgePropertiesPanel edge={selectedEdge} graph={graph} onGoToLinks={onGoToLinks} />
-          ) : (
-            <EmptySelectionPanel />
+
+        {editMode && level.kind !== 'devices' && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-md border bg-card px-3 py-1.5 text-xs shadow-sm">
+            Freeform layout applies at the switch level — double-click a fabric, then Spines or
+            Leaves.
+          </div>
+        )}
+
+        {/* Slide-in detail pane */}
+        <aside
+          className={cn(
+            'absolute top-0 right-0 h-full w-[340px] bg-card border-l shadow-xl transition-transform duration-200 overflow-auto',
+            detailOpen ? 'translate-x-0' : 'translate-x-full'
           )}
-        </div>
+        >
+          {selectedNode && (
+            <DetailPane
+              title={selectedNode.label}
+              subtitle={selectedNode.sublabel}
+              status={selectedNode.status}
+              onClose={() => setSelectedNodeId(null)}
+            >
+              <NodeDetails
+                node={selectedNode}
+                graph={graph}
+                onDrill={() => {
+                  const next = drillInto(selectedNode, level)
+                  if (next) goTo(next)
+                }}
+                onSelectDevice={(id) => {
+                  if (selectedNode.fabricId) {
+                    goTo({ kind: 'devices', fabricId: selectedNode.fabricId })
+                    setSelectedNodeId(id)
+                  }
+                }}
+                onGoToRack={onGoToRack}
+                onGoToLinks={onGoToLinks}
+              />
+            </DetailPane>
+          )}
+          {selectedEdge && (
+            <DetailPane
+              title={selectedEdge.count === 1 ? 'Cable link' : `${selectedEdge.count} cable links`}
+              subtitle={selectedEdge.label}
+              status="healthy"
+              onClose={() => setSelectedEdgeId(null)}
+            >
+              <EdgeDetails edge={selectedEdge} graph={graph} onGoToLinks={onGoToLinks} />
+            </DetailPane>
+          )}
+        </aside>
+
+        {/* Legend drawer */}
+        <aside
+          className={cn(
+            'absolute top-0 right-0 h-full w-[300px] bg-card border-l shadow-xl transition-transform duration-200 overflow-auto',
+            legendOpen ? 'translate-x-0' : 'translate-x-full'
+          )}
+        >
+          <LegendPane onClose={() => setLegendOpen(false)} />
+        </aside>
       </div>
 
       <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reset to auto-layout?</AlertDialogTitle>
+            <AlertDialogTitle>Reset saved layout?</AlertDialogTitle>
             <AlertDialogDescription>
-              This deletes <code className="font-mono">topology_layout.yaml</code> and re-runs
-              the auto-layout algorithm. Your manual node positions will be discarded.
+              This deletes <code className="font-mono">topology_layout.yaml</code>. Switch positions
+              go back to the automatic tiered layout.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleReset}>Reset</AlertDialogAction>
+            <AlertDialogAction onClick={handleResetLayout}>Reset</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -476,7 +630,6 @@ function TopologyCanvas({
   )
 }
 
-// Wrapper — react-flow's hooks need a Provider in scope.
 export function TopologyView(props: TopologyViewProps) {
   return (
     <ReactFlowProvider>
@@ -486,387 +639,566 @@ export function TopologyView(props: TopologyViewProps) {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Custom node renderers
+// Tiles
 // ────────────────────────────────────────────────────────────────────
 
-const ROLE_COLORS = {
-  spine: { bg: 'bg-violet-50 dark:bg-violet-950/40', border: 'border-violet-300 dark:border-violet-800', text: 'text-violet-900 dark:text-violet-100', tag: 'bg-violet-200 dark:bg-violet-900 text-violet-900 dark:text-violet-100' },
-  leaf: { bg: 'bg-sky-50 dark:bg-sky-950/40', border: 'border-sky-300 dark:border-sky-800', text: 'text-sky-900 dark:text-sky-100', tag: 'bg-sky-200 dark:bg-sky-900 text-sky-900 dark:text-sky-100' },
-  ipn: { bg: 'bg-amber-50 dark:bg-amber-950/40', border: 'border-amber-300 dark:border-amber-800', text: 'text-amber-900 dark:text-amber-100', tag: 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100' }
-} as const
-
-function SpineNodeRenderer({ data, selected }: NodeProps<RFNode<TopoNodeData>>) {
-  return <PortNodeRenderer data={data} selected={selected ?? false} portSide="bottom" />
+const STATUS_STYLE: Record<HealthStatus, { icon: string; pill: string; badge: string | null; glyph: string }> = {
+  healthy: { icon: 'text-ok', pill: 'bg-ok-soft', badge: null, glyph: '' },
+  warning: { icon: 'text-warn', pill: 'bg-warn-soft', badge: 'bg-warn', glyph: '–' },
+  minor: { icon: 'text-minor', pill: 'bg-minor-soft', badge: 'bg-minor', glyph: '!' },
+  major: { icon: 'text-major', pill: 'bg-major-soft', badge: 'bg-major', glyph: '!' },
+  critical: { icon: 'text-crit', pill: 'bg-crit-soft', badge: 'bg-crit', glyph: '×' },
+  unknown: { icon: 'text-unknown', pill: 'bg-unknown-soft', badge: 'bg-unknown', glyph: '?' }
 }
 
-function LeafNodeRenderer({ data, selected }: NodeProps<RFNode<TopoNodeData>>) {
-  return <PortNodeRenderer data={data} selected={selected ?? false} portSide="top" />
-}
-
-// IPN routers sit in the top tier; their ports face down toward the
-// spines below them.
-function IpnNodeRenderer({ data, selected }: NodeProps<RFNode<TopoNodeData>>) {
-  return <PortNodeRenderer data={data} selected={selected ?? false} portSide="bottom" />
-}
-
-function PortNodeRenderer({
-  data,
-  selected,
-  portSide
-}: {
-  data: TopoNodeData
-  selected: boolean
-  portSide: 'top' | 'bottom'
-}) {
-  const node = data.topo
-  const colors = ROLE_COLORS[node.role]
-  const dim = nodeDimensions(node)
-  const orphan = node.model_id === 'unknown'
-
-  // Distribute handles evenly across the port-side edge.
-  const ports = node.usedPorts
-  const handles = ports.map((p, i) => {
-    const ratio = ports.length === 1 ? 0.5 : (i + 0.5) / ports.length
-    return { port: p, leftPct: ratio * 100 }
-  })
-
+function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodeProps<TileNode>) {
+  const n = data.scene
+  const s = STATUS_STYLE[n.status]
+  const stacked = n.kind === 'group'
+  const drillable = n.kind === 'fabric' || n.kind === 'group'
   return (
     <div
-      className={`rounded-lg border-2 shadow-sm relative ${colors.bg} ${colors.border} ${
-        selected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''
-      } ${orphan ? 'border-dashed' : ''}`}
-      style={{ width: dim.width, height: dim.height }}
+      className={cn(
+        'flex flex-col items-center select-none transition-opacity',
+        data.dimmed && 'opacity-25'
+      )}
+      style={{ width: TILE_W, height: TILE_H }}
+      title={drillable ? 'Double-click to open' : undefined}
     >
-      {/* Source handles (one per used port) */}
-      {handles.map((h) => (
-        <Handle
-          key={`out-${h.port}`}
-          id={`out:${h.port}`}
-          type="source"
-          position={portSide === 'bottom' ? Position.Bottom : Position.Top}
-          style={{
-            left: `${h.leftPct}%`,
-            transform: 'translate(-50%, 0)',
-            width: 8,
-            height: 8,
-            background: 'hsl(var(--primary))',
-            border: '1px solid hsl(var(--primary-foreground))'
-          }}
-        />
-      ))}
-      {/* Target handles (matching ids so edges can attach in either direction) */}
-      {handles.map((h) => (
-        <Handle
-          key={`in-${h.port}`}
-          id={`in:${h.port}`}
-          type="target"
-          position={portSide === 'bottom' ? Position.Bottom : Position.Top}
-          style={{
-            left: `${h.leftPct}%`,
-            transform: 'translate(-50%, 0)',
-            width: 8,
-            height: 8,
-            opacity: 0
-          }}
-        />
-      ))}
-
-      <div className={`px-3 py-2 ${colors.text}`}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="font-semibold text-sm truncate">{node.label}</div>
-          <span
-            className={`text-[10px] uppercase tracking-wider rounded px-1.5 py-0.5 ${colors.tag}`}
-          >
-            {node.role}
+      <div className="relative">
+        {stacked && (
+          <>
+            <div className="absolute -top-2 -right-2 size-14 rounded-lg border border-tile-border/70 bg-tile" />
+            <div className="absolute -top-1 -right-1 size-14 rounded-lg border border-tile-border/85 bg-tile" />
+          </>
+        )}
+        <div
+          className={cn(
+            'relative size-14 rounded-lg border bg-tile border-tile-border flex items-center justify-center shadow-sm',
+            selected && 'ring-2 ring-primary ring-offset-2 ring-offset-canvas',
+            n.kind === 'device' && n.device?.model_id === 'unknown' && 'border-dashed'
+          )}
+        >
+          <Handle
+            type="target"
+            position={targetPosition ?? Position.Top}
+            style={{ opacity: 0, width: 4, height: 4, minWidth: 0, minHeight: 0, border: 0 }}
+            isConnectable={false}
+          />
+          <Handle
+            type="source"
+            position={sourcePosition ?? Position.Bottom}
+            style={{ opacity: 0, width: 4, height: 4, minWidth: 0, minHeight: 0, border: 0 }}
+            isConnectable={false}
+          />
+          <span className={cn('size-7', s.icon)}>
+            <TileIcon kind={n.kind} role={n.role} />
           </span>
-        </div>
-        <div className="text-[11px] opacity-70 font-mono truncate">{node.model_id}</div>
-        {node.pod_index != null && (
-          <div className="text-[10px] mt-1">
-            <span className="rounded bg-foreground/10 px-1.5 py-0.5 font-medium">
-              Pod {node.pod_index + 1}
+          {s.badge && (
+            <span
+              className={cn(
+                'absolute -top-2 -right-2 size-4 rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-tile',
+                s.badge
+              )}
+            >
+              {s.glyph}
             </span>
-          </div>
-        )}
-        {node.rack && (
-          <div className="text-[10px] opacity-60 mt-1">
-            Rack: <span className="font-mono">{node.rack}</span>
-          </div>
-        )}
-        <div className="text-[10px] opacity-60 mt-0.5">
-          {ports.length} port{ports.length === 1 ? '' : 's'} in use
+          )}
+          {stacked && (
+            <span className="absolute -bottom-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-card border text-[10px] font-semibold flex items-center justify-center">
+              {n.count}
+            </span>
+          )}
         </div>
       </div>
+      <div
+        className={cn(
+          'mt-2 max-w-full truncate rounded px-1.5 py-0.5 text-[11px] font-medium leading-tight',
+          s.pill
+        )}
+      >
+        {n.label}
+      </div>
+    </div>
+  )
+}
 
-      {/* Port labels along the handle edge */}
-      {ports.length > 0 && ports.length <= 16 && (
-        <div
-          className={`absolute left-0 right-0 ${
-            portSide === 'bottom' ? 'bottom-0 translate-y-full pt-1' : 'top-0 -translate-y-full pb-1'
-          } text-[8px] font-mono text-muted-foreground pointer-events-none`}
-          style={{ height: 14 }}
-        >
-          {handles.map((h) => (
-            <span
-              key={h.port}
-              className="absolute"
-              style={{
-                left: `${h.leftPct}%`,
-                transform: 'translate(-50%, 0)'
-              }}
-            >
-              {shortPortName(h.port)}
-            </span>
-          ))}
-        </div>
+function TileIcon({ kind, role }: { kind: SceneNode['kind']; role: SceneNode['role'] }) {
+  if (kind === 'fabric') return <Globe className="size-full" strokeWidth={1.6} />
+  if (kind === 'ipn' || role === 'ipn') return <RouterGlyph />
+  return <SwitchGlyph />
+}
+
+// ND's switch glyph: two horizontal arrows with crossing shafts.
+function SwitchGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-full" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 8h14" />
+      <path d="M14 5l3 3-3 3" />
+      <path d="M21 16H7" />
+      <path d="M10 13l-3 3 3 3" />
+      <path d="M9 8l6 8" />
+      <path d="M15 8l-6 8" />
+    </svg>
+  )
+}
+
+// Cisco router glyph: circle with crossing arrows.
+function RouterGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-full" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9.5" />
+      <path d="M7 9.5h8M12.5 7l2.5 2.5L12.5 12" />
+      <path d="M17 14.5H9M11.5 12L9 14.5l2.5 2.5" />
+    </svg>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Edges — bezier, fanned when several cables share a pair
+// ────────────────────────────────────────────────────────────────────
+
+function FanEdgeRenderer({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  data,
+  selected
+}: EdgeProps<FanEdge>) {
+  const index = data?.index ?? 0
+  const siblings = data?.siblings ?? 1
+  const count = data?.scene.count ?? 1
+  const horizontal = sourcePosition === Position.Right || sourcePosition === Position.Left
+  const off = (index - (siblings - 1) / 2) * 12
+
+  let path: string
+  let lx: number
+  let ly: number
+  if (siblings <= 1) {
+    ;[path, lx, ly] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+  } else if (!horizontal) {
+    const my = (sourceY + targetY) / 2
+    path = `M ${sourceX} ${sourceY} C ${sourceX + off} ${my}, ${targetX + off} ${my}, ${targetX} ${targetY}`
+    lx = (sourceX + targetX) / 2 + off * 0.75
+    ly = my
+  } else {
+    const mx = (sourceX + targetX) / 2
+    path = `M ${sourceX} ${sourceY} C ${mx} ${sourceY + off}, ${mx} ${targetY + off}, ${targetX} ${targetY}`
+    lx = mx
+    ly = (sourceY + targetY) / 2 + off * 0.75
+  }
+  const width = Math.min(1.5 + (count - 1) * 0.35, 6)
+  const showLabel = selected || (data?.showLabel ?? false)
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={path}
+        interactionWidth={14}
+        style={{
+          strokeWidth: selected ? width + 1 : width,
+          stroke: selected ? 'var(--primary)' : 'var(--link)',
+          opacity: selected ? 1 : 0.9
+        }}
+      />
+      {showLabel && (
+        <EdgeLabelRenderer>
+          <div
+            className="absolute pointer-events-none rounded border bg-card px-1.5 py-0.5 text-[10px] font-medium shadow-sm nodrag nopan"
+            style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}
+          >
+            {data?.scene.label}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Chrome: controls, actions menu, status chip
+// ────────────────────────────────────────────────────────────────────
+
+function CtrlButton({
+  children,
+  title,
+  onClick,
+  active,
+  disabled
+}: {
+  children: ReactNode
+  title: string
+  onClick(): void
+  active?: boolean
+  disabled?: boolean
+}) {
+  return (
+    <button
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'size-9 flex items-center justify-center border-b last:border-b-0 text-foreground/80 hover:bg-accent hover:text-foreground cursor-pointer disabled:opacity-35 disabled:cursor-default [&_svg]:size-4',
+        active && 'bg-primary/15 text-primary'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function StatusChip({ status, children }: { status: HealthStatus; children: ReactNode }) {
+  return (
+    <span className={cn('rounded px-2 py-0.5 text-[11px] font-medium', STATUS_STYLE[status].pill)}>
+      {children}
+    </span>
+  )
+}
+
+function ActionsMenu({
+  onClose,
+  orientation,
+  onOrientation,
+  aggregate,
+  onAggregate,
+  editMode,
+  onEditMode,
+  canReset,
+  onReset,
+  onExpandAll,
+  onCollapse,
+  onFit,
+  onLegend
+}: {
+  onClose(): void
+  orientation: Orientation
+  onOrientation(o: Orientation): void
+  aggregate: boolean
+  onAggregate(v: boolean): void
+  editMode: boolean
+  onEditMode(v: boolean): void
+  canReset: boolean
+  onReset(): void
+  onExpandAll(): void
+  onCollapse(): void
+  onFit(): void
+  onLegend(): void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    const t = window.setTimeout(() => window.addEventListener('mousedown', onDown), 0)
+    return () => {
+      window.clearTimeout(t)
+      window.removeEventListener('mousedown', onDown)
+    }
+  }, [onClose])
+
+  const row = 'w-full flex items-center justify-between gap-4 px-3 py-2 text-sm text-left hover:bg-accent cursor-pointer'
+  return (
+    <div
+      ref={ref}
+      className="absolute right-0 top-full mt-1 w-64 rounded-md border bg-popover text-popover-foreground shadow-lg z-20 py-1"
+    >
+      <div className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Layout
+      </div>
+      <button className={row} onClick={() => onOrientation('vertical')}>
+        <span>Vertical (default)</span>
+        <Radio on={orientation === 'vertical'} />
+      </button>
+      <button className={row} onClick={() => onOrientation('horizontal')}>
+        <span>Horizontal</span>
+        <Radio on={orientation === 'horizontal'} />
+      </button>
+      <div className="my-1 border-t" />
+      <button className={row} onClick={() => onAggregate(!aggregate)}>
+        <span>Aggregate links</span>
+        <Switch on={aggregate} />
+      </button>
+      <button className={row} onClick={() => onEditMode(!editMode)}>
+        <span>Freeform layout</span>
+        <Switch on={editMode} />
+      </button>
+      <div className="my-1 border-t" />
+      <button className={row} onClick={() => { onExpandAll(); onClose() }}>
+        Expand to switches
+      </button>
+      <button className={row} onClick={() => { onCollapse(); onClose() }}>
+        Collapse to fabrics
+      </button>
+      <button className={row} onClick={() => { onFit(); onClose() }}>
+        Fit view
+      </button>
+      <button className={row} onClick={() => { onLegend(); onClose() }}>
+        Legend
+      </button>
+      {canReset && (
+        <>
+          <div className="my-1 border-t" />
+          <button className={cn(row, 'text-destructive')} onClick={() => { onReset(); onClose() }}>
+            Reset saved layout…
+          </button>
+        </>
       )}
     </div>
   )
 }
 
-function shortPortName(p: string): string {
-  // "Eth1/49" → "49"; "Eth1/49/2" → "49/2"
-  const m = /^Eth\d+\/(.+)$/.exec(p)
-  return m ? m[1] : p
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Pod boundaries (Multi-Pod ACI) — soft labeled backdrop per pod
-// ────────────────────────────────────────────────────────────────────
-
-const POD_PAD = 28
-const POD_LABEL_H = 24
-
-// Build non-interactive backdrop nodes, one per ACI pod, sized to the
-// bounding box of that pod's spines + leaves. Returns [] for single-pod
-// designs (no node carries a pod_index).
-function computePodBoundaries(
-  nodes: TopologyNode[],
-  positions: Map<string, { x: number; y: number }>
-): RFNode<TopoNodeData>[] {
-  const pods = new Map<number, { minX: number; minY: number; maxX: number; maxY: number }>()
-  for (const n of nodes) {
-    if (n.pod_index == null) continue
-    const pos = positions.get(n.id)
-    if (!pos) continue
-    const dim = nodeDimensions(n)
-    const b = pods.get(n.pod_index) ?? {
-      minX: Infinity,
-      minY: Infinity,
-      maxX: -Infinity,
-      maxY: -Infinity
-    }
-    b.minX = Math.min(b.minX, pos.x)
-    b.minY = Math.min(b.minY, pos.y)
-    b.maxX = Math.max(b.maxX, pos.x + dim.width)
-    b.maxY = Math.max(b.maxY, pos.y + dim.height)
-    pods.set(n.pod_index, b)
-  }
-  const out: RFNode<TopoNodeData>[] = []
-  for (const [pod, b] of [...pods.entries()].sort((a, c) => a[0] - c[0])) {
-    if (!Number.isFinite(b.minX)) continue
-    out.push({
-      id: `pod-boundary-${pod}`,
-      type: 'podBoundary',
-      position: { x: b.minX - POD_PAD, y: b.minY - POD_PAD - POD_LABEL_H },
-      data: { podLabel: `Pod ${pod + 1}` } as unknown as TopoNodeData,
-      draggable: false,
-      selectable: false,
-      focusable: false,
-      zIndex: -1,
-      style: {
-        width: b.maxX - b.minX + POD_PAD * 2,
-        height: b.maxY - b.minY + POD_PAD * 2 + POD_LABEL_H
-      }
-    })
-  }
-  return out
-}
-
-function PodBoundaryRenderer({ data }: NodeProps<RFNode<TopoNodeData>>) {
-  const label = (data as unknown as { podLabel?: string }).podLabel ?? 'Pod'
+function Radio({ on }: { on: boolean }) {
   return (
-    <div className="w-full h-full rounded-xl border-2 border-dashed border-amber-400/50 bg-amber-100/10 dark:bg-amber-400/[0.04] pointer-events-none">
-      <div className="text-xs font-semibold text-amber-700 dark:text-amber-300 px-2 pt-1">
-        {label}
-      </div>
-    </div>
+    <span className={cn('size-3.5 rounded-full border-2 flex items-center justify-center', on ? 'border-primary' : 'border-muted-foreground/50')}>
+      {on && <span className="size-1.5 rounded-full bg-primary" />}
+    </span>
+  )
+}
+
+function Switch({ on }: { on: boolean }) {
+  return (
+    <span className={cn('relative inline-block h-4 w-7 rounded-full transition-colors', on ? 'bg-primary' : 'bg-muted-foreground/40')}>
+      <span className={cn('absolute top-0.5 size-3 rounded-full bg-white transition-transform', on ? 'translate-x-3.5' : 'translate-x-0.5')} />
+    </span>
   )
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Properties panels
+// Detail + legend panes
 // ────────────────────────────────────────────────────────────────────
 
-function NodePropertiesPanel({
+function DetailPane({
+  title,
+  subtitle,
+  status,
+  onClose,
+  children
+}: {
+  title: string
+  subtitle: string | null
+  status: HealthStatus
+  onClose(): void
+  children: ReactNode
+}) {
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-base font-semibold truncate">{title}</div>
+          {subtitle && <div className="text-xs font-mono text-muted-foreground truncate">{subtitle}</div>}
+        </div>
+        <StatusChip status={status}>{statusLabel(status)}</StatusChip>
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="size-7 -mr-1 -mt-1 rounded hover:bg-accent flex items-center justify-center cursor-pointer"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function statusLabel(s: HealthStatus): string {
+  return { healthy: 'Healthy', warning: 'Warning', minor: 'Minor', major: 'Major', critical: 'Critical', unknown: 'Unknown' }[s]
+}
+
+function NodeDetails({
   node,
+  graph,
+  onDrill,
+  onSelectDevice,
   onGoToRack,
   onGoToLinks
 }: {
-  node: TopologyNode
+  node: SceneNode
+  graph: TopologyGraph
+  onDrill(): void
+  onSelectDevice(id: string): void
   onGoToRack(): void
   onGoToLinks(): void
 }) {
-  const orphan = node.model_id === 'unknown'
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-base">{node.label}</CardTitle>
-          <span className="text-[10px] uppercase tracking-wider rounded px-1.5 py-0.5 bg-muted text-muted-foreground">
-            {node.role}
-          </span>
-        </div>
-        <CardDescription className="font-mono text-xs">{node.id}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const dev = node.device
+
+  if (dev) {
+    const orphan = dev.model_id === 'unknown'
+    const links = graph.edges.filter((e) => e.source === dev.id || e.target === dev.id)
+    return (
+      <div className="space-y-3 text-sm">
         {orphan && (
-          <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-3 py-2 text-xs">
-            This device is referenced by a cable link but isn't in the current rack layout.
-            Re-generate or re-import to re-anchor it.
+          <div className="rounded border border-minor bg-minor-soft px-3 py-2 text-xs">
+            Referenced by a cable link but missing from the rack layout. Re-generate or re-import
+            to re-anchor it.
           </div>
         )}
-        <KV label="Model" value={<span className="font-mono">{node.model_id}</span>} />
-        <KV label="Role" value={node.role} />
-        {node.pod_index != null && <KV label="Pod" value={`Pod ${node.pod_index + 1}`} />}
-        <KV label="Rack" value={node.rack ?? <span className="text-muted-foreground">—</span>} />
-        <KV label="RU" value={node.ru ?? <span className="text-muted-foreground">—</span>} />
-        <div>
-          <div className="text-xs text-muted-foreground mb-1">
-            Used ports ({node.usedPorts.length})
+        {dev.usedPorts.length === 0 && !orphan && node.status === 'warning' && (
+          <div className="rounded border border-warn bg-warn-soft px-3 py-2 text-xs">
+            No cable links attached while other {dev.role === 'spine' ? 'spines' : 'leaves'} are
+            wired.
           </div>
-          {node.usedPorts.length === 0 ? (
+        )}
+        <KV label="Role" value={dev.role.toUpperCase()} />
+        <KV label="Model" value={<span className="font-mono">{dev.model_id}</span>} />
+        {dev.pod_index != null && dev.role !== 'leaf' && <KV label="Pod" value={`Pod ${dev.pod_index + 1}`} />}
+        <KV label="Rack" value={dev.rack ?? <Dash />} />
+        <KV label="RU" value={dev.ru ?? <Dash />} />
+        <KV label="Links" value={links.length} />
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Used ports ({dev.usedPorts.length})</div>
+          {dev.usedPorts.length === 0 ? (
             <div className="text-xs text-muted-foreground italic">No cable links attached.</div>
           ) : (
             <div className="flex flex-wrap gap-1">
-              {node.usedPorts.map((p) => (
-                <span
-                  key={p}
-                  className="rounded bg-muted text-muted-foreground text-[10px] font-mono px-1.5 py-0.5"
-                >
+              {dev.usedPorts.map((p) => (
+                <span key={p} className="rounded bg-muted text-muted-foreground text-[10px] font-mono px-1.5 py-0.5">
                   {p}
                 </span>
               ))}
             </div>
           )}
         </div>
-        <div className="flex flex-wrap gap-2 pt-2">
-          <Button size="sm" variant="outline" onClick={onGoToRack}>
-            Rack View
-          </Button>
-          <Button size="sm" variant="outline" onClick={onGoToLinks}>
-            Links
-          </Button>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" variant="outline" onClick={onGoToRack}>Rack View</Button>
+          <Button size="sm" variant="outline" onClick={onGoToLinks}>Links</Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    )
+  }
+
+  // Fabric or group tile: summarise members.
+  const members = node.memberIds.map((id) => byId.get(id)).filter((n): n is TopologyNode => !!n)
+  const models = new Map<string, number>()
+  for (const m of members) models.set(m.model_id, (models.get(m.model_id) ?? 0) + 1)
+  const memberIds = new Set(node.memberIds)
+  const linkCount = graph.edges.filter((e) => memberIds.has(e.source) || memberIds.has(e.target)).length
+  return (
+    <div className="space-y-3 text-sm">
+      {node.kind === 'fabric' && (
+        <>
+          <KV label="Spines" value={members.filter((m) => m.role === 'spine').length} />
+          <KV label="Leaves" value={members.filter((m) => m.role === 'leaf').length} />
+        </>
+      )}
+      {node.kind === 'group' && <KV label={node.label} value={node.count} />}
+      <KV label="Cable links" value={linkCount} />
+      <div>
+        <div className="text-xs text-muted-foreground mb-1">Models</div>
+        <div className="space-y-1">
+          {[...models.entries()].map(([model, n]) => (
+            <div key={model} className="flex justify-between text-xs">
+              <span className="font-mono">{model}</span>
+              <span className="text-muted-foreground">× {n}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <Button size="sm" onClick={onDrill}>
+        {node.kind === 'fabric' ? 'Open fabric' : `Expand ${node.label.toLowerCase()}`}
+      </Button>
+      {node.kind === 'group' && (
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Members</div>
+          <div className="max-h-64 overflow-auto rounded border divide-y">
+            {members.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => onSelectDevice(m.id)}
+                className="w-full flex items-center justify-between px-2 py-1.5 text-xs hover:bg-accent text-left cursor-pointer"
+              >
+                <span className="truncate">{m.label}</span>
+                <span className="text-muted-foreground font-mono">{m.usedPorts.length} ports</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
-function EdgePropertiesPanel({
+function EdgeDetails({
   edge,
   graph,
   onGoToLinks
 }: {
-  edge: ReturnType<typeof extractTopology> extends infer R
-    ? R extends { edges: (infer E)[] } ? E : never
-    : never
+  edge: SceneEdge
   graph: TopologyGraph
   onGoToLinks(): void
 }) {
-  const sourceNode = graph.nodes.find((n) => n.id === edge.source)
-  const targetNode = graph.nodes.find((n) => n.id === edge.target)
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Cable link</CardTitle>
-        <CardDescription className="font-mono text-xs">{edge.id}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <KV
-          label="From"
-          value={
-            <span>
-              <span className="font-medium">{sourceNode?.label ?? edge.source}</span>{' '}
-              <span className="font-mono text-xs text-muted-foreground">: {edge.sourcePort}</span>
-            </span>
-          }
-        />
-        <KV
-          label="To"
-          value={
-            <span>
-              <span className="font-medium">{targetNode?.label ?? edge.target}</span>{' '}
-              <span className="font-mono text-xs text-muted-foreground">: {edge.targetPort}</span>
-            </span>
-          }
-        />
-        <KV label="Speed" value={`${edge.speed_g}G`} />
-        <KV
-          label="Optic"
-          value={
-            edge.optic_id ? (
-              <span className="font-mono">{edge.optic_id}</span>
-            ) : (
-              <span className="text-muted-foreground">—</span>
-            )
-          }
-        />
-        <KV
-          label="Patch panel"
-          value={
-            edge.patch_panel_id ? (
-              <span className="font-mono">{edge.patch_panel_id}</span>
-            ) : (
-              <span className="text-muted-foreground">—</span>
-            )
-          }
-        />
-        <KV
-          label="Length"
-          value={
-            edge.length_m != null ? (
-              `${edge.length_m} m`
-            ) : (
-              <span className="text-muted-foreground">—</span>
-            )
-          }
-        />
-        {edge.label && (
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const linkById = new Map(graph.edges.map((e) => [e.id, e]))
+  const links = edge.linkIds.map((id) => linkById.get(id)).filter((l): l is TopologyEdge => !!l)
+  const name = (id: string) => byId.get(id)?.label ?? id
+  if (links.length === 1) {
+    const l = links[0]
+    return (
+      <div className="space-y-3 text-sm">
+        <KV label="From" value={<Endpoint label={name(l.source)} port={l.sourcePort} />} />
+        <KV label="To" value={<Endpoint label={name(l.target)} port={l.targetPort} />} />
+        <KV label="Speed" value={`${l.speed_g}G`} />
+        <KV label="Optic" value={l.optic_id ? <span className="font-mono">{l.optic_id}</span> : <Dash />} />
+        <KV label="Patch panel" value={l.patch_panel_id ? <span className="font-mono">{l.patch_panel_id}</span> : <Dash />} />
+        <KV label="Length" value={l.length_m != null ? `${l.length_m} m` : <Dash />} />
+        {l.label && (
           <div>
             <div className="text-xs text-muted-foreground mb-1">Label</div>
-            <div className="text-xs">{edge.label}</div>
+            <div className="text-xs">{l.label}</div>
           </div>
         )}
-        <div className="flex flex-wrap gap-2 pt-2">
-          <Button size="sm" variant="outline" onClick={onGoToLinks}>
-            Edit in Links
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function EmptySelectionPanel() {
+        <Button size="sm" variant="outline" onClick={onGoToLinks}>Edit in Links</Button>
+      </div>
+    )
+  }
+  const shown = links.slice(0, 40)
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Topology</CardTitle>
-        <CardDescription className="text-xs">Click a node or cable to inspect.</CardDescription>
-      </CardHeader>
-      <CardContent className="text-xs text-muted-foreground space-y-2">
-        <p>
-          Auto-layout is generated by elkjs. Drag any node to fork into{' '}
-          <code className="font-mono">topology_layout.yaml</code>.
-        </p>
-        <p>Use the action bar above to fit the view, re-run auto-layout, or reset.</p>
-      </CardContent>
-    </Card>
+    <div className="space-y-3 text-sm">
+      <KV label="Cables" value={edge.count} />
+      <KV label="Speeds" value={edge.speeds.map((s) => `${s}G`).join(', ')} />
+      <KV label="Total bandwidth" value={`${edge.totalG}G`} />
+      <div>
+        <div className="text-xs text-muted-foreground mb-1">Connections</div>
+        <div className="max-h-72 overflow-auto rounded border divide-y">
+          {shown.map((l) => (
+            <div key={l.id} className="px-2 py-1.5 text-[11px] font-mono flex items-center justify-between gap-2">
+              <span className="truncate">{name(l.source)}:{l.sourcePort}</span>
+              <span className="text-muted-foreground">↔</span>
+              <span className="truncate">{name(l.target)}:{l.targetPort}</span>
+            </div>
+          ))}
+          {links.length > shown.length && (
+            <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+              + {links.length - shown.length} more — see the Links tab
+            </div>
+          )}
+        </div>
+      </div>
+      <Button size="sm" variant="outline" onClick={onGoToLinks}>Open Links</Button>
+    </div>
   )
 }
 
-function KV({ label, value }: { label: string; value: React.ReactNode }) {
+function Endpoint({ label, port }: { label: string; port: string }) {
+  return (
+    <span>
+      <span className="font-medium">{label}</span>{' '}
+      <span className="font-mono text-xs text-muted-foreground">: {port}</span>
+    </span>
+  )
+}
+
+function Dash() {
+  return <span className="text-muted-foreground">—</span>
+}
+
+function KV({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 text-sm">
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -875,24 +1207,67 @@ function KV({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Status pill (mirrors LinksView / RackView)
-// ────────────────────────────────────────────────────────────────────
-
-function ForkStatusPill({ isForked }: { isForked: boolean }) {
-  if (isForked) {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 text-xs font-medium px-2.5 py-1">
-        <GitFork className="size-3.5" />
-        Forked — your layout
-      </span>
-    )
+function LegendPane({ onClose }: { onClose(): void }) {
+  const statuses: HealthStatus[] = ['healthy', 'warning', 'minor', 'major', 'critical', 'unknown']
+  const meaning: Record<HealthStatus, string> = {
+    healthy: 'Wired as designed',
+    warning: 'No cable links while peers are wired',
+    minor: 'Orphan — link references a missing device',
+    major: 'Reserved',
+    critical: 'Reserved',
+    unknown: 'Insufficient information'
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-muted text-muted-foreground text-xs font-medium px-2.5 py-1">
-      <Cable className="size-3.5" />
-      Auto-layout (elkjs)
-    </span>
+    <div className="p-4 space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="text-base font-semibold">Topology legend</div>
+        <button onClick={onClose} aria-label="Close" className="size-7 rounded hover:bg-accent flex items-center justify-center cursor-pointer">
+          <X className="size-4" />
+        </button>
+      </div>
+      <section className="space-y-2">
+        <div className="text-sm font-medium">Node health</div>
+        <p className="text-xs text-muted-foreground">
+          A badge is only shown on nodes that need attention.
+        </p>
+        <ul className="space-y-1.5 text-sm">
+          {statuses.map((s) => (
+            <li key={s} className="flex items-center gap-2">
+              <span className={cn('size-3.5 rounded-full', STATUS_STYLE[s].badge ?? 'bg-ok')} />
+              <span className="w-16">{statusLabel(s)}</span>
+              <span className="text-xs text-muted-foreground">{meaning[s]}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="space-y-2">
+        <div className="text-sm font-medium">Node type</div>
+        <ul className="space-y-2 text-sm">
+          <li className="flex items-center gap-2"><span className="size-5 text-ok"><Globe className="size-full" strokeWidth={1.6} /></span> Fabric — double-click to open</li>
+          <li className="flex items-center gap-2"><span className="size-5 text-ok"><SwitchGlyph /></span> Switch (spine or leaf)</li>
+          <li className="flex items-center gap-2">
+            <span className="relative size-5 text-ok">
+              <span className="absolute -top-0.5 -right-0.5 size-5 rounded border border-tile-border bg-tile" />
+              <span className="absolute inset-0 rounded border border-tile-border bg-tile flex items-center justify-center"><SwitchGlyph /></span>
+            </span>
+            Stacked group (Spines / Leaves) — double-click to expand
+          </li>
+          <li className="flex items-center gap-2"><span className="size-5 text-ok"><RouterGlyph /></span> IPN router (Multi-Pod)</li>
+        </ul>
+      </section>
+      <section className="space-y-2">
+        <div className="text-sm font-medium">Links</div>
+        <ul className="space-y-2 text-sm">
+          <li className="flex items-center gap-2"><span className="w-8 border-t-2 border-link" /> One cable</li>
+          <li className="flex items-center gap-2"><span className="w-8 border-t-4 border-link" /> Aggregated cables (label shows count × speed)</li>
+        </ul>
+      </section>
+      <section className="space-y-1 text-xs text-muted-foreground">
+        <div><kbd className="rounded border bg-muted px-1 font-mono">Esc</kbd> closes panes, then folds up one level.</div>
+        <div>Double-click empty canvas to fold up one level.</div>
+        <div>Filter grammar: <code className="font-mono">model=…</code>, <code className="font-mono">rack contains …</code>, <code className="font-mono">role!=spine</code>, or free text (name).</div>
+      </section>
+    </div>
   )
 }
 

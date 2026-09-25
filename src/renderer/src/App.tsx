@@ -78,18 +78,30 @@ export function App() {
   }
 
   return (
-    <div className="h-full flex bg-background text-foreground">
-      <Sidebar activeId={route} onSelect={setRoute} />
-      <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-12 border-b flex items-center justify-end px-3 gap-2">
+    <div className="h-full flex flex-col bg-background text-foreground">
+      {/* Navy top bar — brand on the left, utilities on the right (ND-style). */}
+      <header className="h-12 shrink-0 flex items-center justify-between px-4 bg-topbar text-topbar-foreground">
+        <div className="flex items-center gap-2.5">
+          <BrandMark />
+          <span className="text-[15px] font-semibold tracking-tight">DCN Designer</span>
+          <span className="ml-2 hidden sm:inline text-[11px] uppercase tracking-wider text-topbar-foreground/55">
+            Spine-leaf design
+          </span>
+        </div>
+        <div className="flex items-center gap-1 [&_button]:text-topbar-foreground [&_button:hover]:bg-white/10 [&_button:hover]:text-topbar-foreground">
           <ThemeToggle />
-        </header>
-        <section className="flex-1 min-h-0">
-          {route === 'home' && (currentProjectPath ? <ProjectView /> : <SplashView />)}
-          {route === 'library' && <LibraryView />}
-          {route === 'settings' && <SettingsView />}
-        </section>
-      </main>
+        </div>
+      </header>
+      <div className="flex-1 flex min-h-0">
+        <Sidebar activeId={route} onSelect={setRoute} />
+        <main className="flex-1 flex flex-col min-w-0">
+          <section className="flex-1 min-h-0">
+            {route === 'home' && (currentProjectPath ? <ProjectView /> : <SplashView />)}
+            {route === 'library' && <LibraryView />}
+            {route === 'settings' && <SettingsView />}
+          </section>
+        </main>
+      </div>
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -105,6 +117,25 @@ export function App() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// Small fabric glyph for the top bar — two tiers of nodes joined by links.
+function BrandMark() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+      <rect x="2" y="2" width="7" height="5" rx="1.2" fill="currentColor" opacity="0.95" />
+      <rect x="13" y="2" width="7" height="5" rx="1.2" fill="currentColor" opacity="0.95" />
+      <rect x="1" y="15" width="5" height="5" rx="1.2" fill="currentColor" opacity="0.7" />
+      <rect x="8.5" y="15" width="5" height="5" rx="1.2" fill="currentColor" opacity="0.7" />
+      <rect x="16" y="15" width="5" height="5" rx="1.2" fill="currentColor" opacity="0.7" />
+      <path
+        d="M5.5 7v3M16.5 7v3M5.5 10h11M3.5 15v-5M11 15v-5M18.5 15v-5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        opacity="0.75"
+      />
+    </svg>
   )
 }
 

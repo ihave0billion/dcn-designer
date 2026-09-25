@@ -23,6 +23,13 @@ export const TopologyLayoutFileSchema = z.object({
   seeded_at: z.string().nullable().default(null),
   // ISO timestamp of the first user drag. Null while still in auto state.
   forked_at: z.string().nullable().default(null),
-  positions: z.array(TopologyNodePositionSchema).default([])
+  positions: z.array(TopologyNodePositionSchema).default([]),
+  // Which layout engine the positions were saved from. v1.1's ND-style
+  // tiles are a different geometry from the v1.0 elk boxes, so positions
+  // from a file without this marker are ignored (not deleted) until the
+  // user resets or re-drags.
+  generator: z.string().nullable().default(null)
 })
+
+export const TOPOLOGY_LAYOUT_GENERATOR = 'nd-tiles-v1'
 export type TopologyLayoutFile = z.infer<typeof TopologyLayoutFileSchema>

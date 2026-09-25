@@ -20,13 +20,12 @@ interface SidebarProps {
   onSelect: (id: SidebarRoute) => void
 }
 
+// Navy icon rail, Nexus Dashboard style: icon stacked over a short label,
+// active item carries a left accent bar. Stays navy in both themes.
 export function Sidebar({ activeId, onSelect }: SidebarProps) {
   return (
-    <aside className="w-56 shrink-0 border-r flex flex-col bg-sidebar text-sidebar-foreground">
-      <div className="px-4 h-12 flex items-center border-b">
-        <span className="text-sm font-semibold tracking-tight">DCN Designer</span>
-      </div>
-      <nav className="flex-1 p-2 space-y-1">
+    <aside className="w-[88px] shrink-0 flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
+      <nav className="flex-1 py-2 flex flex-col gap-1">
         {NAV.map((item) => {
           const Icon = item.icon
           const active = item.id === activeId
@@ -35,21 +34,26 @@ export function Sidebar({ activeId, onSelect }: SidebarProps) {
               key={item.id}
               onClick={() => onSelect(item.id)}
               className={cn(
-                'w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors text-left cursor-pointer',
+                'relative mx-2 flex flex-col items-center gap-1 rounded-md px-1 py-3 text-[11px] font-medium transition-colors cursor-pointer',
                 active
                   ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                  : 'hover:bg-sidebar-accent/60'
+                  : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
               )}
             >
-              <Icon className="size-4" />
+              {active && (
+                <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-primary" />
+              )}
+              <Icon className="size-5" strokeWidth={1.75} />
               <span>{item.label}</span>
             </button>
           )
         })}
       </nav>
-      <div className="p-3 border-t text-xs text-muted-foreground">
-        v1.0.0 ·{' '}
-        <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">?</kbd> shortcuts
+      <div className="px-2 py-3 border-t border-sidebar-border text-[10px] text-sidebar-foreground/60 text-center leading-tight">
+        v1.1.0
+        <br />
+        <kbd className="rounded border border-sidebar-border bg-sidebar-accent/40 px-1 font-mono">?</kbd>{' '}
+        keys
       </div>
     </aside>
   )

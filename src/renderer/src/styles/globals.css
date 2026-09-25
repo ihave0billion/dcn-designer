@@ -3,60 +3,120 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-:root {
-  --radius: 0.625rem;
+/*
+  Theme: "graphite + navy" — a cool, slightly blue-tinted graphite with a
+  Cisco-blue accent, modelled on the Nexus Dashboard chrome (navy header
+  bar, off-white canvas in light mode). The sidebar rail and the top bar
+  stay navy in BOTH themes, like ND; only the content area flips.
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  Status colours (design health) are shared by both themes and consumed
+  by the Topology view and status pills: --ok / --warn / --minor / --major
+  / --crit / --unknown, mirroring ND's operational-status legend.
+*/
+
+:root {
+  --radius: 0.5rem;
+
+  --background: oklch(0.975 0.003 250);
+  --foreground: oklch(0.22 0.02 255);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.22 0.02 255);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.22 0.02 255);
+  --primary: oklch(0.52 0.15 245);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.94 0.008 250);
+  --secondary-foreground: oklch(0.28 0.02 255);
+  --muted: oklch(0.945 0.008 250);
+  --muted-foreground: oklch(0.50 0.02 255);
+  --accent: oklch(0.93 0.02 240);
+  --accent-foreground: oklch(0.25 0.03 250);
+  --destructive: oklch(0.55 0.22 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.88 0.01 250);
+  --input: oklch(0.86 0.01 250);
+  --ring: oklch(0.60 0.14 240);
+
+  /* Navy chrome — same in light + dark, like ND's header. */
+  --sidebar: oklch(0.31 0.065 258);
+  --sidebar-foreground: oklch(0.90 0.012 250);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-accent: oklch(0.40 0.08 252);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --topbar: oklch(0.26 0.06 260);
+  --topbar-foreground: oklch(0.96 0.008 250);
+
+  /* Topology canvas */
+  --canvas: oklch(0.985 0.002 250);
+  --canvas-grid: oklch(0.85 0.01 250);
+  --tile: oklch(1 0 0);
+  --tile-border: oklch(0.72 0.02 250);
+  --link: oklch(0.62 0.16 145);
+  --link-muted: oklch(0.72 0.05 145);
+
+  /* Status */
+  --ok: oklch(0.62 0.17 145);
+  --ok-soft: oklch(0.93 0.06 145);
+  --warn: oklch(0.60 0.12 220);
+  --warn-soft: oklch(0.93 0.05 220);
+  --minor: oklch(0.78 0.16 85);
+  --minor-soft: oklch(0.95 0.08 90);
+  --major: oklch(0.70 0.19 45);
+  --major-soft: oklch(0.94 0.07 50);
+  --crit: oklch(0.58 0.22 25);
+  --crit-soft: oklch(0.93 0.06 25);
+  --unknown: oklch(0.60 0.02 250);
+  --unknown-soft: oklch(0.93 0.005 250);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.205 0.014 252);
+  --foreground: oklch(0.93 0.008 250);
+  --card: oklch(0.25 0.015 252);
+  --card-foreground: oklch(0.93 0.008 250);
+  --popover: oklch(0.26 0.016 252);
+  --popover-foreground: oklch(0.93 0.008 250);
+  --primary: oklch(0.72 0.12 230);
+  --primary-foreground: oklch(0.16 0.03 250);
+  --secondary: oklch(0.31 0.016 252);
+  --secondary-foreground: oklch(0.93 0.008 250);
+  --muted: oklch(0.29 0.014 252);
+  --muted-foreground: oklch(0.70 0.014 250);
+  --accent: oklch(0.32 0.025 245);
+  --accent-foreground: oklch(0.95 0.008 250);
+  --destructive: oklch(0.68 0.19 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.72 0.12 230);
+
+  --sidebar: oklch(0.255 0.05 258);
+  --sidebar-foreground: oklch(0.88 0.012 250);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-accent: oklch(0.34 0.07 252);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --topbar: oklch(0.215 0.05 260);
+  --topbar-foreground: oklch(0.95 0.008 250);
+
+  --canvas: oklch(0.19 0.013 252);
+  --canvas-grid: oklch(0.30 0.012 252);
+  --tile: oklch(0.285 0.016 252);
+  --tile-border: oklch(0.48 0.02 250);
+  --link: oklch(0.70 0.15 145);
+  --link-muted: oklch(0.55 0.06 145);
+
+  --ok: oklch(0.72 0.17 145);
+  --ok-soft: oklch(0.36 0.07 145);
+  --warn: oklch(0.70 0.12 220);
+  --warn-soft: oklch(0.36 0.05 220);
+  --minor: oklch(0.82 0.16 85);
+  --minor-soft: oklch(0.40 0.08 85);
+  --major: oklch(0.74 0.18 45);
+  --major-soft: oklch(0.40 0.08 45);
+  --crit: oklch(0.66 0.21 25);
+  --crit-soft: oklch(0.38 0.08 25);
+  --unknown: oklch(0.65 0.02 250);
+  --unknown-soft: oklch(0.34 0.008 250);
 }
 
 @theme inline {
@@ -89,6 +149,28 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-topbar: var(--topbar);
+  --color-topbar-foreground: var(--topbar-foreground);
+
+  --color-canvas: var(--canvas);
+  --color-canvas-grid: var(--canvas-grid);
+  --color-tile: var(--tile);
+  --color-tile-border: var(--tile-border);
+  --color-link: var(--link);
+  --color-link-muted: var(--link-muted);
+
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-minor: var(--minor);
+  --color-minor-soft: var(--minor-soft);
+  --color-major: var(--major);
+  --color-major-soft: var(--major-soft);
+  --color-crit: var(--crit);
+  --color-crit-soft: var(--crit-soft);
+  --color-unknown: var(--unknown);
+  --color-unknown-soft: var(--unknown-soft);
 }
 
 @layer base {
@@ -103,8 +185,27 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     user-select: none;
   }
+}
+
+/* React-flow chrome, themed. The library's own stylesheet targets light
+   mode; these overrides keep the canvas + controls on our tokens. */
+.react-flow {
+  background-color: var(--color-canvas);
+}
+.react-flow__attribution {
+  display: none;
+}
+.react-flow__edge-path {
+  stroke: var(--color-link);
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--color-primary);
+}
+.react-flow__node {
+  font-family: inherit;
 }

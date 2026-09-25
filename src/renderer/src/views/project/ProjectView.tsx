@@ -186,6 +186,7 @@ export function ProjectView() {
           ) : (
             <TopologyView
               projectPath={currentProjectPath}
+              fabricName={req.project.name}
               onGoToDesign={() => setActiveTab('design')}
               onGoToRack={() => setActiveTab('rack')}
               onGoToLinks={() => setActiveTab('links')}

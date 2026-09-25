@@ -10,11 +10,12 @@ The app has two targets from one codebase:
 
 | | |
 |---|---|
-| URL | **<http://192.0.2.121/>** (port 80) |
+| URL (LAN) | **<http://192.0.2.121/>** (port 80) |
+| URL (anywhere) | **<https://dcn-designer.your-tailnet.ts.net/>** — Tailscale Funnel, no VPN client needed |
 | Host | Unraid NAS (`ssh nas`), container on the `br0` macvlan |
 | Container | `dcn-designer`, `--restart unless-stopped` |
 | Workspace | `/mnt/user/appdata/dcn-designer` → `/data` in the container |
-| Auth | none — LAN only (see below) |
+| Auth | HTTP Basic, shared password (`DCN_AUTH_PASSWORD`, any username) — required since the Funnel went live 2026-09-25 |
 
 ### Why a dedicated IP
 
@@ -56,6 +57,37 @@ Builds the image locally, ships it over SSH, and restarts the container. The ima
 deliberately **not** built on the NAS — a docker build there is enough load to wedge the
 box, and Unraid has no `docker compose`, so the container runs via plain `docker run`.
 
+## Public access — Tailscale Funnel
+
+Since 2026-09-25 the app is also reachable from the internet at
+**<https://dcn-designer.your-tailnet.ts.net/>** without a Tailscale client, the same
+way SilverBullet is at `another-host.your-tailnet.ts.net`. The pieces:
+
+| | |
+|---|---|
+| Sidecar | container `tailscale-dcn` (`tailscale/tailscale:latest`), `--restart unless-stopped`, on `br0` at `192.0.2.122`, `TS_USERSPACE=true`, state in the named volume `tailscale-dcn-state` |
+| Tailnet node | `dcn-designer` (owner owner@) |
+| Funnel | `tailscale funnel --bg http://192.0.2.121:80` — proxies to the app's LAN address; the config persists in the node state |
+
+Why a second sidecar instead of adding to `tailscale-hermes`: Funnel only listens on
+443/8443/10000 and the existing node's 443 is SilverBullet. A path prefix would break the
+app's absolute `/assets` URLs, and 8443 is exactly the kind of high port the work laptop
+blocks. A dedicated node gets its own hostname on 443.
+
+Operate it from the NAS (or anything with its `docker.sock`):
+
+```bash
+docker exec tailscale-dcn tailscale funnel status          # what's exposed
+docker exec tailscale-dcn tailscale funnel --https=443 off  # take it offline
+docker exec tailscale-dcn tailscale funnel --bg http://192.0.2.121:80   # bring it back
+```
+
+If the container is ever recreated it needs to re-join: `docker exec tailscale-dcn tailscale login`
+prints a URL; approve it in the admin console, then `tailscale set --hostname=dcn-designer`
+and re-run the funnel command. Because the LAN-only assumption no longer holds, **always
+deploy with `DCN_AUTH_PASSWORD` set** (below); the password lives only in the container's
+environment (`docker inspect dcn-designer`).
+
 ## The workspace
 
 Everything the app owns — the switch/server/optics library and every project — lives in
@@ -92,15 +124,19 @@ The renderer is identical; only the four native file dialogs have no browser equ
 | `DCN_AUTH_PASSWORD` | _(unset)_ | If set, requires HTTP Basic auth (any username). |
 | `DCN_MAX_UPLOAD_BYTES` | 64 MiB | Upload size cap. |
 
-### Before exposing it beyond the LAN
+### Auth is mandatory now
 
-The deployment is currently **unauthenticated**, which is fine for a trusted home
-network and nothing more. Anyone who can reach the port can read and edit every design.
-Set a password and redeploy before putting it on Tailscale or anything internet-facing:
+The app is internet-facing through the Funnel, so every redeploy must carry the shared
+password or the new container comes up open. The deploy script only passes it through
+when it is in the environment:
 
 ```bash
-DCN_AUTH_PASSWORD='something-long' scripts/deploy-nas.sh
+DCN_AUTH_PASSWORD="$(docker -H ssh://nas inspect dcn-designer --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ^DCN_AUTH_PASSWORD= | cut -d= -f2-)" \
+  scripts/deploy-nas.sh
 ```
+
+(or just export the known password first). Browsers cache Basic credentials per origin,
+so LAN and Funnel visitors each log in once.
 
 ## Running the web target locally
 
