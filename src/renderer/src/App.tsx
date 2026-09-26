@@ -21,6 +21,9 @@ import { SplashView } from './views/splash/SplashView'
 import { ProjectView } from './views/project/ProjectView'
 import { LibraryView } from './views/library/LibraryView'
 import { SettingsView } from './views/SettingsView'
+import { IS_WEB_BUILD } from './lib/runtime-target'
+import { Lock } from 'lucide-react'
+import { Button } from './components/ui/button'
 
 export function App() {
   const { ready, workspacePath, currentProjectPath } = useWorkspace()
@@ -92,6 +95,20 @@ export function App() {
         </div>
         <div className="flex items-center gap-1 [&_button]:text-topbar-foreground [&_button:hover]:bg-sidebar-accent [&_button:hover]:text-topbar-foreground">
           <ThemeToggle />
+          {IS_WEB_BUILD && (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Lock — end this session now"
+              onClick={async () => {
+                await fetch('/api/logout', { method: 'POST' }).catch(() => undefined)
+                window.location.reload()
+              }}
+            >
+              <Lock />
+              Lock
+            </Button>
+          )}
         </div>
       </header>
       <div className="flex-1 flex min-h-0">

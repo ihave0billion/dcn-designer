@@ -51,7 +51,7 @@ export function Sidebar({ activeId, onSelect }: SidebarProps) {
       </nav>
       <div className="mx-3 h-1 hazard opacity-60" />
       <div className="px-2 py-3 text-[10px] text-sidebar-foreground/60 text-center leading-tight font-mono">
-        v1.2.0
+        v1.2.1
         <br />
         <kbd className="border border-sidebar-border bg-sidebar-accent/40 px-1">?</kbd> keys
       </div>

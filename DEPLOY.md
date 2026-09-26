@@ -15,7 +15,7 @@ The app has two targets from one codebase:
 | Host | Unraid NAS (`ssh nas`), container on the `br0` macvlan |
 | Container | `dcn-designer`, `--restart unless-stopped` |
 | Workspace | `/mnt/user/appdata/dcn-designer` → `/data` in the container |
-| Auth | HTTP Basic, shared password (`DCN_AUTH_PASSWORD`, any username) — required since the Funnel went live 2026-09-25 |
+| Auth | Login page + server-side session (`DCN_AUTH_PASSWORD`); session cookie dies with the browser, 30 min idle / 12 h max by default; **Lock** in the top bar ends it now |
 
 ### Why a dedicated IP
 
@@ -121,7 +121,9 @@ The renderer is identical; only the four native file dialogs have no browser equ
 | `DCN_WORKSPACE` | `~/DCN-Designer` | Workspace root. Every request path is jailed under it. |
 | `PORT` | `8788` | Listen port. The NAS deployment sets it to `80`. |
 | `DCN_LAN_IP` | `192.0.2.121` | Deploy script only — the container's macvlan address. |
-| `DCN_AUTH_PASSWORD` | _(unset)_ | If set, requires HTTP Basic auth (any username). |
+| `DCN_AUTH_PASSWORD` | _(unset)_ | If set, browsers get a login page and a session cookie. HTTP Basic is no longer accepted. |
+| `DCN_SESSION_IDLE_MIN` | 30 | Minutes without a request before the session is locked. |
+| `DCN_SESSION_MAX_HOURS` | 12 | Absolute session lifetime regardless of activity. |
 | `DCN_MAX_UPLOAD_BYTES` | 64 MiB | Upload size cap. |
 
 ### Auth is mandatory now
@@ -135,8 +137,24 @@ DCN_AUTH_PASSWORD="$(docker -H ssh://nas inspect dcn-designer --format '{{range 
   scripts/deploy-nas.sh
 ```
 
-(or just export the known password first). Browsers cache Basic credentials per origin,
-so LAN and Funnel visitors each log in once.
+(or just export the known password first).
+
+### How the lock behaves (v1.2.1)
+
+Sessions are server-side: a random token in an `HttpOnly; SameSite=Strict` cookie (plus
+`Secure` behind the Funnel) with no expiry date, so the browser discards it when it closes.
+The server also enforces an idle timeout and an absolute lifetime, and restarting the
+container drops every session. Five wrong passwords lock that client out for a minute.
+
+Two caveats worth knowing:
+
+- Chrome's *"Continue where you left off"* startup option restores session cookies across a
+  browser restart. The idle timeout still applies, so the window is at most
+  `DCN_SESSION_IDLE_MIN` minutes.
+- Basic auth was removed on purpose. Browsers replay Basic credentials silently for the
+  rest of the browser session, and password managers sync them between machines — that is
+  why the app once opened on a second laptop without asking. Scripts that need the API can
+  `POST /api/login` with `{"password": "…"}` and reuse the returned cookie.
 
 ## Running the web target locally
 

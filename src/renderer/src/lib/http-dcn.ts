@@ -21,12 +21,23 @@ import type {
  */
 const DOWNLOAD_PREFIX = 'browser-download:'
 
+/**
+ * A 401 means the login session ended (idle timeout, Lock, server restart).
+ * Reloading swaps the app for the server's login page; the throw stops the
+ * caller from acting on an empty result in the meantime.
+ */
+function sessionEnded(res: Response): never {
+  if (res.status === 401) window.location.reload()
+  throw new Error('Session ended — sign in again')
+}
+
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
   const res = await fetch('/api/dcn', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ method, args })
   })
+  if (res.status === 401) sessionEnded(res)
   const payload = (await res.json()) as { result?: T; error?: string }
   if (!res.ok || payload.error) {
     throw new Error(payload.error || `Request failed (${res.status})`)
@@ -74,6 +85,7 @@ async function upload(endpoint: string, file: File): Promise<{ path: string; bas
     headers: { 'content-type': 'application/octet-stream' },
     body: await file.arrayBuffer()
   })
+    if (res.status === 401) sessionEnded(res)
   const payload = (await res.json()) as { path?: string; basename?: string; error?: string }
   if (!res.ok || payload.error || !payload.path) {
     throw new Error(payload.error || `Upload failed (${res.status})`)
@@ -159,6 +171,7 @@ const httpDcn: DcnApi = {
       headers: { 'content-type': 'application/octet-stream' },
       body: data as BodyInit
     })
+    if (res.status === 401) sessionEnded(res)
     if (!res.ok) {
       const payload = (await res.json().catch(() => ({}))) as { error?: string }
       throw new Error(payload.error || `Write failed (${res.status})`)

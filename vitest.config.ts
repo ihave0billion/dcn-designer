@@ -23,7 +23,9 @@ export default defineConfig({
       'src/domain/**/*.spec.ts',
       'src/renderer/src/lib/**/*.test.ts',
       // Phase 9 — the PDF report is JSX, so its test file is .tsx.
-      'src/renderer/src/lib/**/*.test.tsx'
+      'src/renderer/src/lib/**/*.test.tsx',
+      // v1.2.1 — pure server modules (sessions)
+      'src/server/**/*.test.ts'
     ],
     environment: 'node',
     globals: false

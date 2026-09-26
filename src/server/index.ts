@@ -2,16 +2,32 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { join, dirname, extname, basename, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, promises as fs, createReadStream } from 'node:fs'
-import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import AdmZip from 'adm-zip'
 import { handlers } from './dcn-handlers.ts'
 import { WORKSPACE_ROOT, UPLOAD_DIR, resolveInRoot } from './paths.ts'
+import {
+  SESSION_COOKIE,
+  SessionStore,
+  clearedSessionCookie,
+  passwordMatches,
+  readCookie,
+  sessionCookie
+} from './sessions.ts'
+import { loginPage } from './login-page.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const WEB_ROOT = process.env.DCN_WEB_ROOT || join(here, '..', '..', 'out', 'web')
 const PORT = Number(process.env.PORT || 8788)
 const HOST = process.env.HOST || '0.0.0.0'
 const AUTH_PASSWORD = process.env.DCN_AUTH_PASSWORD || ''
+// Session clocks (minutes / hours). Idle = no request for this long → locked.
+const SESSION_IDLE_MIN = Number(process.env.DCN_SESSION_IDLE_MIN || 30)
+const SESSION_MAX_HOURS = Number(process.env.DCN_SESSION_MAX_HOURS || 12)
+const sessions = new SessionStore({
+  idleMs: SESSION_IDLE_MIN * 60_000,
+  absoluteMs: SESSION_MAX_HOURS * 3_600_000
+})
 const MAX_UPLOAD_BYTES = Number(process.env.DCN_MAX_UPLOAD_BYTES || 64 * 1024 * 1024)
 
 const MIME: Record<string, string> = {
@@ -38,25 +54,85 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(text)
 }
 
-/** Constant-time compare so the shared password can't be probed by timing. */
-function passwordMatches(supplied: string): boolean {
-  const a = Buffer.from(supplied)
-  const b = Buffer.from(AUTH_PASSWORD)
-  if (a.length !== b.length) return false
-  return timingSafeEqual(a, b)
+/**
+ * Login gate. Off unless DCN_AUTH_PASSWORD is set — the default deployment is
+ * LAN-only. With a password, browsers get a login page and a session cookie
+ * (see sessions.ts). HTTP Basic is deliberately NOT accepted any more: browsers
+ * and password managers replay Basic credentials silently, which is exactly
+ * the "it just opened without asking" behaviour this replaces.
+ */
+function sessionToken(req: IncomingMessage): string | null {
+  return readCookie(req.headers.cookie, SESSION_COOKIE)
 }
 
-/**
- * Optional shared-password gate. Off unless DCN_AUTH_PASSWORD is set — the default
- * deployment is LAN-only. Set it when exposing the app beyond the local network.
- */
 function authorized(req: IncomingMessage): boolean {
   if (!AUTH_PASSWORD) return true
-  const header = req.headers.authorization || ''
-  if (!header.startsWith('Basic ')) return false
-  const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8')
-  const password = decoded.slice(decoded.indexOf(':') + 1)
-  return passwordMatches(password)
+  return sessions.validate(sessionToken(req))
+}
+
+/** Behind Tailscale Funnel / any TLS proxy the cookie must be Secure. */
+function isHttps(req: IncomingMessage): boolean {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim()
+  return proto === 'https'
+}
+
+/** Client key for login throttling — first forwarded hop, else the socket. */
+function clientKey(req: IncomingMessage): string {
+  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+  return fwd || req.socket.remoteAddress || 'unknown'
+}
+
+async function handleLogin(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const key = clientKey(req)
+  const wantsJson = String(req.headers['content-type'] || '').includes('application/json')
+  const fail = (status: number, message: string): void => {
+    if (wantsJson) sendJson(res, status, { error: message })
+    else {
+      res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(loginPage({ error: message, idleMinutes: SESSION_IDLE_MIN }))
+    }
+  }
+  if (!AUTH_PASSWORD) {
+    fail(400, 'No password is configured on this server')
+    return
+  }
+  if (sessions.isLocked(key)) {
+    fail(429, 'Too many attempts — try again in a minute')
+    return
+  }
+  const body = (await readBody(req)).toString('utf8')
+  let password = ''
+  if (wantsJson) {
+    try {
+      password = String((JSON.parse(body) as { password?: unknown }).password ?? '')
+    } catch {
+      password = ''
+    }
+  } else {
+    password = new URLSearchParams(body).get('password') ?? ''
+  }
+  if (!passwordMatches(password, AUTH_PASSWORD)) {
+    sessions.recordFailure(key)
+    fail(401, 'Wrong password')
+    return
+  }
+  sessions.recordSuccess(key)
+  sessions.sweep()
+  const token = sessions.create()
+  const cookie = sessionCookie(token, isHttps(req))
+  if (wantsJson) {
+    res.writeHead(204, { 'set-cookie': cookie, 'cache-control': 'no-store' })
+    res.end()
+  } else {
+    res.writeHead(303, { 'set-cookie': cookie, location: '/', 'cache-control': 'no-store' })
+    res.end()
+  }
+}
+
+function handleLogout(req: IncomingMessage, res: ServerResponse): void {
+  sessions.revoke(sessionToken(req))
+  res.writeHead(204, { 'set-cookie': clearedSessionCookie(isHttps(req)), 'cache-control': 'no-store' })
+  res.end()
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -186,9 +262,41 @@ const server = createServer((req, res) => {
     return
   }
 
+  if (url.pathname === '/api/login' && req.method === 'POST') {
+    handleLogin(req, res).catch((err: unknown) => {
+      sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
+    })
+    return
+  }
+  if (url.pathname === '/api/logout' && req.method === 'POST') {
+    handleLogout(req, res)
+    return
+  }
+  if (url.pathname === '/api/session') {
+    const token = sessionToken(req)
+    const ok = authorized(req)
+    sendJson(res, 200, {
+      authenticated: ok,
+      protected: Boolean(AUTH_PASSWORD),
+      idle_minutes: SESSION_IDLE_MIN,
+      remaining_seconds: AUTH_PASSWORD ? sessions.remainingSeconds(token) : null
+    })
+    return
+  }
+
   if (!authorized(req)) {
-    res.writeHead(401, { 'www-authenticate': 'Basic realm="DCN Designer"' })
-    res.end('Authentication required')
+    // The fonts are public so the login page can use them; everything else is
+    // a login page (browsers) or a 401 (API callers — the renderer reloads).
+    if (url.pathname.startsWith('/fonts/')) {
+      void serveStatic(res, url.pathname)
+      return
+    }
+    if (url.pathname.startsWith('/api/')) {
+      sendJson(res, 401, { error: 'Not signed in' })
+      return
+    }
+    res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(loginPage({ idleMinutes: SESSION_IDLE_MIN }))
     return
   }
 
@@ -217,5 +325,11 @@ await (handlers['ensure-workspace'] as (p: string) => Promise<unknown>)(WORKSPAC
 server.listen(PORT, HOST, () => {
   console.log(`[dcn] DCN Designer web server listening on http://${HOST}:${PORT}`)
   console.log(`[dcn] workspace: ${WORKSPACE_ROOT}`)
-  console.log(`[dcn] auth: ${AUTH_PASSWORD ? 'shared password enabled' : 'open (LAN only)'}`)
+  console.log(
+    `[dcn] auth: ${
+      AUTH_PASSWORD
+        ? `login page + session cookie (idle ${SESSION_IDLE_MIN} min, max ${SESSION_MAX_HOURS} h)`
+        : 'open (LAN only)'
+    }`
+  )
 })
