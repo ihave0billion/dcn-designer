@@ -382,7 +382,19 @@ export interface Point {
 
 // Rows by tier, each centred on the widest row; columns instead when
 // horizontal. Items in a row follow natural label order (Leaf 2 before
-// Leaf 10).
+// Leaf 10). A tier with more than ROW_MAX tiles wraps into balanced rows
+// (45 leaves → 23 + 22) so very wide fabrics stay readable.
+export const ROW_MAX = 40
+
+function chunkBalanced<T>(items: T[], max: number): T[][] {
+  if (items.length <= max) return [items]
+  const rows = Math.ceil(items.length / max)
+  const per = Math.ceil(items.length / rows)
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += per) out.push(items.slice(i, i + per))
+  return out
+}
+
 export function layoutScene(
   nodes: SceneNode[],
   orientation: Orientation = 'vertical'
@@ -394,14 +406,17 @@ export function layoutScene(
     tiers.set(n.tier, arr)
   }
   const tierKeys = [...tiers.keys()].sort((a, b) => a - b)
-  for (const k of tierKeys) tiers.get(k)!.sort((a, b) => comparePortNames(a.label, b.label))
+  const rows: SceneNode[][] = []
+  for (const k of tierKeys) {
+    const sorted = tiers.get(k)!.sort((a, b) => comparePortNames(a.label, b.label))
+    rows.push(...chunkBalanced(sorted, ROW_MAX))
+  }
 
   const stride = TILE_W + TILE_GAP
-  const widest = Math.max(0, ...tierKeys.map((k) => tiers.get(k)!.length)) * stride - TILE_GAP
+  const widest = Math.max(0, ...rows.map((r) => r.length)) * stride - TILE_GAP
 
   const out = new Map<string, Point>()
-  tierKeys.forEach((k, rowIndex) => {
-    const row = tiers.get(k)!
+  rows.forEach((row, rowIndex) => {
     const rowWidth = row.length * stride - TILE_GAP
     const offset = (widest - rowWidth) / 2
     row.forEach((n, i) => {

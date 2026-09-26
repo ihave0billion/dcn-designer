@@ -8,6 +8,7 @@ import {
   edgeLabel,
   GROUP_ID,
   layoutScene,
+  ROW_MAX,
   matchesFilter,
   parentLevel,
   parseFilter,
@@ -217,6 +218,30 @@ describe('layoutScene', () => {
     // spines (2) centred over leaves (3): spine row starts half a stride in
     const stride = TILE_W + 14
     expect(pos.get('spine-1')!.x).toBeCloseTo(stride / 2)
+  })
+
+  it('wraps a tier past ROW_MAX into balanced rows below it', () => {
+    const nodes = [
+      dev('spine-1', 'spine'),
+      dev('spine-2', 'spine'),
+      ...Array.from({ length: 45 }, (_, i) => dev(`leaf-${i + 1}`, 'leaf'))
+    ]
+    const g: TopologyGraph = { nodes, edges: [], orphanDeviceIds: [] }
+    const scene = buildScene(g, buildFabrics(g, 'X'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true })
+    const pos = layoutScene(scene.nodes, 'vertical')
+    expect(ROW_MAX).toBe(40)
+    const rowY = new Set([...pos.entries()].filter(([id]) => id.startsWith('leaf')).map(([, p]) => p.y))
+    expect(rowY.size).toBe(2) // 45 leaves → two rows (23 + 22)
+    const [y1, y2] = [...rowY].sort((a, b) => a - b)
+    expect(y2 - y1).toBe(TILE_H + TIER_GAP)
+    const firstRow = [...pos.entries()].filter(([, p]) => p.y === y1).length
+    expect(firstRow).toBe(23)
+    expect(pos.get('leaf-1')!.y).toBe(y1)
+    expect(pos.get('leaf-45')!.y).toBe(y2)
+    // 40 or fewer stays on one row
+    const small = buildScene(singlePod(), buildFabrics(singlePod(), 'X'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true })
+    const smallPos = layoutScene(small.nodes, 'vertical')
+    expect(new Set([...smallPos.entries()].filter(([id]) => id.startsWith('leaf')).map(([, p]) => p.y)).size).toBe(1)
   })
 
   it('horizontal layout transposes axes', () => {
