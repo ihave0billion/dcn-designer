@@ -215,7 +215,7 @@ describe('layoutScene', () => {
     // natural sort: leaf 2 before leaf 10
     expect(pos.get('leaf-2')!.x).toBeLessThan(pos.get('leaf-10')!.x)
     // spines (2) centred over leaves (3): spine row starts half a stride in
-    const stride = TILE_W + 18
+    const stride = TILE_W + 14
     expect(pos.get('spine-1')!.x).toBeCloseTo(stride / 2)
   })
 

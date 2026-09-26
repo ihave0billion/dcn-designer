@@ -4,126 +4,159 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
-  Theme: "graphite + navy" — a cool, slightly blue-tinted graphite with a
-  Cisco-blue accent, modelled on the Nexus Dashboard chrome (navy header
-  bar, off-white canvas in light mode). The sidebar rail and the top bar
-  stay navy in BOTH themes, like ND; only the content area flips.
+  Theme: "Night City" — Cyberpunk 2077's UI language. Near-black blue
+  ground, signal-yellow primary, cyan for links and focus, hot magenta
+  for danger/selection, chamfered corners instead of rounded ones, and
+  Rajdhani (the game's condensed sans; bundled under /fonts, SIL OFL).
+
+  Dark is the canonical look. Light mode is the game's inverse menu:
+  saturated yellow ground with black type and cyan/magenta accents.
 
   Status colours (design health) are shared by both themes and consumed
-  by the Topology view and status pills: --ok / --warn / --minor / --major
-  / --crit / --unknown, mirroring ND's operational-status legend.
+  by the Topology view and status chips: --ok / --warn / --minor / --major
+  / --crit / --unknown. Healthy is the theme's own yellow so the topology
+  icons and the cyan links never read as one monochrome wash.
 */
 
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/rajdhani-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/rajdhani-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/rajdhani-700.woff2") format("woff2");
+}
+
 :root {
-  --radius: 0.5rem;
+  --radius: 0rem;
 
-  --background: oklch(0.975 0.003 250);
-  --foreground: oklch(0.22 0.02 255);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.02 255);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.22 0.02 255);
-  --primary: oklch(0.52 0.15 245);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.94 0.008 250);
-  --secondary-foreground: oklch(0.28 0.02 255);
-  --muted: oklch(0.945 0.008 250);
-  --muted-foreground: oklch(0.50 0.02 255);
-  --accent: oklch(0.93 0.02 240);
-  --accent-foreground: oklch(0.25 0.03 250);
-  --destructive: oklch(0.55 0.22 27);
+  /* Light = inverse yellow menu */
+  --background: oklch(0.93 0.14 100);
+  --foreground: oklch(0.16 0.02 275);
+  --card: oklch(0.965 0.08 100);
+  --card-foreground: oklch(0.16 0.02 275);
+  --popover: oklch(0.975 0.05 100);
+  --popover-foreground: oklch(0.16 0.02 275);
+  --primary: oklch(0.16 0.02 275);
+  --primary-foreground: oklch(0.93 0.18 105);
+  --secondary: oklch(0.88 0.12 100);
+  --secondary-foreground: oklch(0.16 0.02 275);
+  --muted: oklch(0.89 0.10 100);
+  --muted-foreground: oklch(0.36 0.03 275);
+  --accent: oklch(0.85 0.09 195);
+  --accent-foreground: oklch(0.16 0.02 275);
+  --destructive: oklch(0.55 0.24 12);
   --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.88 0.01 250);
-  --input: oklch(0.86 0.01 250);
-  --ring: oklch(0.60 0.14 240);
+  --border: oklch(0.16 0.02 275 / 45%);
+  --input: oklch(0.16 0.02 275 / 60%);
+  --ring: oklch(0.55 0.14 200);
+  --hot: oklch(0.58 0.25 5);
 
-  /* Navy chrome — same in light + dark, like ND's header. */
-  --sidebar: oklch(0.31 0.065 258);
-  --sidebar-foreground: oklch(0.90 0.012 250);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-accent: oklch(0.40 0.08 252);
-  --sidebar-accent-foreground: oklch(0.99 0 0);
-  --topbar: oklch(0.26 0.06 260);
-  --topbar-foreground: oklch(0.96 0.008 250);
+  /* Black chrome in both themes */
+  --sidebar: oklch(0.13 0.02 275);
+  --sidebar-foreground: oklch(0.82 0.04 100);
+  --sidebar-border: oklch(0.93 0.18 105 / 25%);
+  --sidebar-accent: oklch(0.93 0.18 105 / 16%);
+  --sidebar-accent-foreground: oklch(0.93 0.18 105);
+  --topbar: oklch(0.11 0.02 275);
+  --topbar-foreground: oklch(0.93 0.18 105);
 
   /* Topology canvas */
-  --canvas: oklch(0.985 0.002 250);
-  --canvas-grid: oklch(0.85 0.01 250);
-  --tile: oklch(1 0 0);
-  --tile-border: oklch(0.72 0.02 250);
-  --link: oklch(0.62 0.16 145);
-  --link-muted: oklch(0.72 0.05 145);
+  --canvas: oklch(0.95 0.06 100);
+  --canvas-grid: oklch(0.16 0.02 275 / 18%);
+  --tile: oklch(0.985 0.03 100);
+  --tile-border: oklch(0.16 0.02 275);
+  --tile-icon: oklch(0.16 0.02 275);
+  --link: oklch(0.52 0.14 200);
+  --link-muted: oklch(0.62 0.08 200);
 
   /* Status */
-  --ok: oklch(0.62 0.17 145);
-  --ok-soft: oklch(0.93 0.06 145);
-  --warn: oklch(0.60 0.12 220);
-  --warn-soft: oklch(0.93 0.05 220);
-  --minor: oklch(0.78 0.16 85);
-  --minor-soft: oklch(0.95 0.08 90);
-  --major: oklch(0.70 0.19 45);
-  --major-soft: oklch(0.94 0.07 50);
-  --crit: oklch(0.58 0.22 25);
-  --crit-soft: oklch(0.93 0.06 25);
-  --unknown: oklch(0.60 0.02 250);
-  --unknown-soft: oklch(0.93 0.005 250);
+  --ok: oklch(0.40 0.03 275);
+  --ok-soft: oklch(0.16 0.02 275 / 10%);
+  --warn: oklch(0.50 0.13 220);
+  --warn-soft: oklch(0.50 0.13 220 / 18%);
+  --minor: oklch(0.62 0.18 60);
+  --minor-soft: oklch(0.62 0.18 60 / 22%);
+  --major: oklch(0.58 0.22 35);
+  --major-soft: oklch(0.58 0.22 35 / 22%);
+  --crit: oklch(0.55 0.25 8);
+  --crit-soft: oklch(0.55 0.25 8 / 22%);
+  --unknown: oklch(0.45 0.02 275);
+  --unknown-soft: oklch(0.45 0.02 275 / 18%);
 }
 
 .dark {
-  --background: oklch(0.205 0.014 252);
-  --foreground: oklch(0.93 0.008 250);
-  --card: oklch(0.25 0.015 252);
-  --card-foreground: oklch(0.93 0.008 250);
-  --popover: oklch(0.26 0.016 252);
-  --popover-foreground: oklch(0.93 0.008 250);
-  --primary: oklch(0.72 0.12 230);
-  --primary-foreground: oklch(0.16 0.03 250);
-  --secondary: oklch(0.31 0.016 252);
-  --secondary-foreground: oklch(0.93 0.008 250);
-  --muted: oklch(0.29 0.014 252);
-  --muted-foreground: oklch(0.70 0.014 250);
-  --accent: oklch(0.32 0.025 245);
-  --accent-foreground: oklch(0.95 0.008 250);
-  --destructive: oklch(0.68 0.19 25);
+  --background: oklch(0.15 0.022 275);
+  --foreground: oklch(0.94 0.02 100);
+  --card: oklch(0.19 0.024 275);
+  --card-foreground: oklch(0.94 0.02 100);
+  --popover: oklch(0.20 0.026 275);
+  --popover-foreground: oklch(0.94 0.02 100);
+  --primary: oklch(0.92 0.20 105);
+  --primary-foreground: oklch(0.14 0.02 275);
+  --secondary: oklch(0.26 0.03 275);
+  --secondary-foreground: oklch(0.94 0.02 100);
+  --muted: oklch(0.24 0.026 275);
+  --muted-foreground: oklch(0.70 0.035 215);
+  --accent: oklch(0.29 0.055 200);
+  --accent-foreground: oklch(0.95 0.07 195);
+  --destructive: oklch(0.62 0.25 12);
   --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 13%);
-  --ring: oklch(0.72 0.12 230);
+  --border: oklch(0.86 0.14 195 / 20%);
+  --input: oklch(0.86 0.14 195 / 30%);
+  --ring: oklch(0.86 0.14 195);
+  --hot: oklch(0.66 0.25 5);
 
-  --sidebar: oklch(0.255 0.05 258);
-  --sidebar-foreground: oklch(0.88 0.012 250);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-accent: oklch(0.34 0.07 252);
-  --sidebar-accent-foreground: oklch(0.99 0 0);
-  --topbar: oklch(0.215 0.05 260);
-  --topbar-foreground: oklch(0.95 0.008 250);
+  --sidebar: oklch(0.12 0.02 275);
+  --sidebar-foreground: oklch(0.80 0.04 100);
+  --sidebar-border: oklch(0.92 0.20 105 / 22%);
+  --sidebar-accent: oklch(0.92 0.20 105 / 14%);
+  --sidebar-accent-foreground: oklch(0.92 0.20 105);
+  --topbar: oklch(0.10 0.02 275);
+  --topbar-foreground: oklch(0.92 0.20 105);
 
-  --canvas: oklch(0.19 0.013 252);
-  --canvas-grid: oklch(0.30 0.012 252);
-  --tile: oklch(0.285 0.016 252);
-  --tile-border: oklch(0.48 0.02 250);
-  --link: oklch(0.70 0.15 145);
-  --link-muted: oklch(0.55 0.06 145);
+  --canvas: oklch(0.13 0.022 275);
+  --canvas-grid: oklch(0.86 0.14 195 / 13%);
+  --tile: oklch(0.20 0.026 275);
+  --tile-border: oklch(0.92 0.20 105 / 60%);
+  --tile-icon: oklch(0.92 0.20 105);
+  --link: oklch(0.86 0.14 195);
+  --link-muted: oklch(0.60 0.08 195);
 
-  --ok: oklch(0.72 0.17 145);
-  --ok-soft: oklch(0.36 0.07 145);
-  --warn: oklch(0.70 0.12 220);
-  --warn-soft: oklch(0.36 0.05 220);
-  --minor: oklch(0.82 0.16 85);
-  --minor-soft: oklch(0.40 0.08 85);
-  --major: oklch(0.74 0.18 45);
-  --major-soft: oklch(0.40 0.08 45);
-  --crit: oklch(0.66 0.21 25);
-  --crit-soft: oklch(0.38 0.08 25);
-  --unknown: oklch(0.65 0.02 250);
-  --unknown-soft: oklch(0.34 0.008 250);
+  --ok: oklch(0.92 0.20 105);
+  --ok-soft: oklch(0.92 0.20 105 / 14%);
+  --warn: oklch(0.78 0.12 250);
+  --warn-soft: oklch(0.78 0.12 250 / 20%);
+  --minor: oklch(0.80 0.17 60);
+  --minor-soft: oklch(0.80 0.17 60 / 20%);
+  --major: oklch(0.70 0.22 35);
+  --major-soft: oklch(0.70 0.22 35 / 22%);
+  --crit: oklch(0.64 0.26 8);
+  --crit-soft: oklch(0.64 0.26 8 / 22%);
+  --unknown: oklch(0.62 0.02 275);
+  --unknown-soft: oklch(0.62 0.02 275 / 18%);
 }
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+
+  --font-sans: "Rajdhani", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -144,6 +177,7 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-hot: var(--hot);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);
@@ -156,6 +190,7 @@
   --color-canvas-grid: var(--canvas-grid);
   --color-tile: var(--tile);
   --color-tile-border: var(--tile-border);
+  --color-tile-icon: var(--tile-icon);
   --color-link: var(--link);
   --color-link-muted: var(--link-muted);
 
@@ -185,9 +220,48 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: "Rajdhani", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     -webkit-font-smoothing: antialiased;
     user-select: none;
+  }
+
+  h1, h2, h3 {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+  }
+
+  kbd, code, pre, .font-mono {
+    font-family: ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    letter-spacing: 0;
+  }
+}
+
+@layer utilities {
+  /* Chamfered corners — the Cyberpunk panel silhouette. */
+  .chamfer {
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  }
+  .chamfer-sm {
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+  }
+  .chamfer-xs {
+    clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 0 100%);
+  }
+  /* Thin primary highlight along a panel's top edge. */
+  .card-glow {
+    box-shadow: inset 0 1px 0 0 color-mix(in oklch, var(--color-primary) 40%, transparent);
+  }
+  /* Yellow hazard stripe used as a section accent. */
+  .hazard {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      var(--color-primary) 0 8px,
+      transparent 8px 16px
+    );
   }
 }
 
@@ -195,6 +269,19 @@
    mode; these overrides keep the canvas + controls on our tokens. */
 .react-flow {
   background-color: var(--color-canvas);
+}
+.react-flow::after {
+  /* faint CRT scanlines over the canvas, under the pointer */
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 3px,
+    oklch(0 0 0 / 0.09) 3px 4px
+  );
 }
 .react-flow__attribution {
   display: none;
@@ -204,7 +291,7 @@
 }
 .react-flow__edge.selected .react-flow__edge-path,
 .react-flow__edge:focus .react-flow__edge-path {
-  stroke: var(--color-primary);
+  stroke: var(--color-hot);
 }
 .react-flow__node {
   font-family: inherit;

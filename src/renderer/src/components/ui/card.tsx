@@ -1,11 +1,16 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
+// Chamfered panel — the Cyberpunk silhouette. A 1px border plus a soft
+// inner top highlight; corners are cut by the `chamfer` utility.
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn('rounded-lg border bg-card text-card-foreground shadow-sm', className)}
+      className={cn(
+        'chamfer card-glow border bg-card text-card-foreground',
+        className
+      )}
       {...props}
     />
   )
@@ -23,7 +28,7 @@ const CardTitle = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivE
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn('text-lg font-semibold leading-none tracking-tight', className)}
+      className={cn('text-lg font-bold uppercase tracking-wider leading-none', className)}
       {...props}
     />
   )
@@ -51,4 +56,4 @@ const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 )
 CardFooter.displayName = 'CardFooter'
 
-export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
+export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent }

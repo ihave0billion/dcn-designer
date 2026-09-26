@@ -31,6 +31,10 @@ export interface TopologyNode {
   // designs and on IPN routers (shared across pods). Drives pod-boundary
   // grouping. Optional so pre-9b fixtures and callers stay valid.
   pod_index?: number | null
+  // v1.2 display metadata, filled in by lib/device-nickname.ts
+  // (applyNicknames) — `label` is then the hostname shown on the canvas.
+  smart?: boolean
+  hostname_source?: 'user' | 'auto'
   // Ports that have at least one cable link attached. Stable-sorted.
   // These render as react-flow Handles on the node.
   usedPorts: string[]

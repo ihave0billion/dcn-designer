@@ -24,6 +24,27 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-09-26 — Per-level topology positions, chamfer clipping, nickname scope
+
+**Positions are per scene, not per device.** With every hierarchy level draggable, the same
+id can appear at several levels (an IPN tile at *All fabrics* and again inside a pod), so a
+flat `device_id → x/y` map is ambiguous. `topology_layout.yaml` now stores
+`scene_positions[{scene, node_id, x, y}]` where `scene` = `<level>|<orientation>`
+(`fabrics|vertical`, `fabric:pod-0|horizontal`, `devices:fabric|vertical`). Snap-back removes
+one scene's rows; the file is deleted when the last scene goes. Generator bumped to
+`cp-tiles-v2` (tile 124 × 100 now) — v1.1 `nd-tiles-v1` files are ignored, not migrated.
+
+**`clip-path` clips children.** The chamfered tile cut off its own count/status badges
+(positioned outside the box). Badges moved to the un-clipped wrapper. Rule: never hang an
+absolutely positioned child outside an element that carries a `chamfer*` utility.
+
+**Nicknames are a topology-only projection.** `applyNicknames` rewrites `label` on a copy
+of the extracted graph; `design.yaml` / rack labels are untouched, so Rack View, Links and
+the PDF still say "Leaf 12 (N9348Y2C6D-SE1U)". If the user wants the nicknames everywhere,
+the right place is `src/domain/rack.ts` where the solver writes `label`, plus a fixture
+update — deferred until they confirm the naming scheme (`<family>-<role><n>`, `smart-sw`
+for DPU switches).
+
 ### 2026-09-25 — v1.1 topology: layout files from the old engine, and headless react-flow
 
 **Legacy `topology_layout.yaml`.** The v1.0 view saved elk positions for 200-px port-handle

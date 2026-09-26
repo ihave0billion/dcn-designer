@@ -4,15 +4,14 @@ import { cn } from '@/lib/utils'
 
 const Tabs = TabsPrimitive.Root
 
-// Underline tabs (Nexus Dashboard style) instead of the pill strip: plain
-// text triggers with a 2px accent bar under the active one.
+// Uppercase text tabs with a thick primary bar under the active one.
 const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.List
     ref={ref}
-    className={cn('inline-flex h-10 items-end gap-6 text-muted-foreground', className)}
+    className={cn('inline-flex h-10 items-end gap-7 text-muted-foreground', className)}
     {...props}
   />
 ))
@@ -25,12 +24,12 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      'relative inline-flex items-center whitespace-nowrap px-0.5 pb-2.5 pt-1 text-sm font-medium transition-colors',
-      'border-b-2 border-transparent -mb-px',
+      'relative inline-flex items-center whitespace-nowrap px-0.5 pb-2 pt-1 text-sm font-semibold uppercase tracking-[0.12em] transition-colors',
+      'border-b-[3px] border-transparent -mb-px',
       'hover:text-foreground',
-      'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm',
+      'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
       'disabled:pointer-events-none disabled:opacity-50',
-      'data-[state=active]:text-foreground data-[state=active]:border-primary',
+      'data-[state=active]:text-primary data-[state=active]:border-primary',
       'cursor-pointer',
       className
     )}

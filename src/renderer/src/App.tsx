@@ -79,16 +79,18 @@ export function App() {
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
-      {/* Navy top bar — brand on the left, utilities on the right (ND-style). */}
-      <header className="h-12 shrink-0 flex items-center justify-between px-4 bg-topbar text-topbar-foreground">
-        <div className="flex items-center gap-2.5">
-          <BrandMark />
-          <span className="text-[15px] font-semibold tracking-tight">DCN Designer</span>
-          <span className="ml-2 hidden sm:inline text-[11px] uppercase tracking-wider text-topbar-foreground/55">
-            Spine-leaf design
+      {/* Black top bar — yellow brand block on the left, utilities on the right. */}
+      <header className="h-12 shrink-0 flex items-center justify-between pr-3 bg-topbar text-topbar-foreground border-b border-sidebar-border">
+        <div className="flex items-center h-full">
+          <div className="h-full px-3 flex items-center bg-primary text-primary-foreground chamfer-sm">
+            <BrandMark />
+          </div>
+          <span className="ml-3 text-[17px] font-bold uppercase tracking-[0.16em]">DCN Designer</span>
+          <span className="ml-3 hidden sm:inline text-[10px] font-semibold uppercase tracking-[0.2em] text-topbar-foreground/50">
+            // spine-leaf design
           </span>
         </div>
-        <div className="flex items-center gap-1 [&_button]:text-topbar-foreground [&_button:hover]:bg-white/10 [&_button:hover]:text-topbar-foreground">
+        <div className="flex items-center gap-1 [&_button]:text-topbar-foreground [&_button:hover]:bg-sidebar-accent [&_button:hover]:text-topbar-foreground">
           <ThemeToggle />
         </div>
       </header>

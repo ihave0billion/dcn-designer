@@ -29,9 +29,9 @@ import {
   Globe,
   Info,
   Loader2,
+  Magnet,
   Maximize2,
   Minus,
-  Pencil,
   Plus,
   X
 } from 'lucide-react'
@@ -51,12 +51,17 @@ import {
 import { useWorkspace } from '@/state/WorkspaceContext'
 import {
   loadCableLinks,
+  loadSwitchesFile,
   loadTopologyLayout,
   saveTopologyLayout,
   deleteTopologyLayout,
   type CableLinksFile
 } from '@/lib/library-io'
-import { TOPOLOGY_LAYOUT_GENERATOR, type TopologyLayoutFile } from '@/schemas/topology-layout'
+import {
+  TOPOLOGY_LAYOUT_GENERATOR,
+  type TopologyLayoutFile,
+  type TopologyScenePosition
+} from '@/schemas/topology-layout'
 import type { DesignResult } from '@domain'
 import {
   extractTopology,
@@ -64,11 +69,13 @@ import {
   type TopologyNode,
   type TopologyEdge
 } from '@/lib/topology-extractor'
+import { applyNicknames } from '@/lib/device-nickname'
 import {
   buildFabrics,
   buildScene,
   drillInto,
   layoutScene,
+  levelKey,
   matchesFilter,
   parentLevel,
   parseFilter,
@@ -107,6 +114,8 @@ interface FanEdgeData extends Record<string, unknown> {
 type TileNode = RFNode<TileData, 'tile'>
 type FanEdge = RFEdge<FanEdgeData, 'fan'>
 
+const FIT = { padding: 0.12, duration: 300, maxZoom: 1.25 }
+
 // ────────────────────────────────────────────────────────────────────
 // Canvas (inside <ReactFlowProvider>)
 // ────────────────────────────────────────────────────────────────────
@@ -118,10 +127,11 @@ function TopologyCanvas({
   onGoToRack,
   onGoToLinks
 }: TopologyViewProps) {
-  const { currentProjectPath } = useWorkspace()
+  const { currentProjectPath, workspacePath } = useWorkspace()
   const [design, setDesign] = useState<DesignResult | null>(null)
   const [cableLinks, setCableLinks] = useState<CableLinksFile | null>(null)
   const [layoutFile, setLayoutFile] = useState<TopologyLayoutFile | null>(null)
+  const [smartModels, setSmartModels] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -130,7 +140,6 @@ function TopologyCanvas({
   const [aggregate, setAggregate] = useState(true)
   const [orientation, setOrientation] = useState<Orientation>('vertical')
   const [filterText, setFilterText] = useState('')
-  const [editMode, setEditMode] = useState(false)
   const [legendOpen, setLegendOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
@@ -150,7 +159,7 @@ function TopologyCanvas({
     setErr(null)
     ;(async () => {
       try {
-        const [designRaw, links, layout] = await Promise.all([
+        const [designRaw, links, layout, switches] = await Promise.all([
           window.dcn
             .fileExists(`${projectPath}/design.yaml`)
             .then((exists) =>
@@ -159,12 +168,22 @@ function TopologyCanvas({
                 : null
             ),
           loadCableLinks(projectPath),
-          loadTopologyLayout(projectPath)
+          loadTopologyLayout(projectPath),
+          // The library tells us which models are smart switches (DPU badge +
+          // "smart-sw" nickname). Missing library = fall back to the SE1U pattern.
+          workspacePath ? loadSwitchesFile(workspacePath).catch(() => null) : Promise.resolve(null)
         ])
         if (cancelled) return
         setDesign(designRaw)
         setCableLinks(links)
         setLayoutFile(layout)
+        setSmartModels(
+          new Set(
+            (switches?.switches ?? [])
+              .filter((s) => s.capabilities.smart_switch || s.capabilities.dpu_integrated)
+              .map((s) => s.id)
+          )
+        )
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e))
       } finally {
@@ -174,12 +193,12 @@ function TopologyCanvas({
     return () => {
       cancelled = true
     }
-  }, [currentProjectPath, projectPath])
+  }, [currentProjectPath, projectPath, workspacePath])
 
   const graph: TopologyGraph = useMemo(() => {
     if (!design) return { nodes: [], edges: [], orphanDeviceIds: [] }
-    return extractTopology(design, cableLinks?.links ?? [])
-  }, [design, cableLinks])
+    return applyNicknames(extractTopology(design, cableLinks?.links ?? []), smartModels)
+  }, [design, cableLinks, smartModels])
 
   const fabrics = useMemo(() => buildFabrics(graph, fabricName), [graph, fabricName])
 
@@ -197,17 +216,27 @@ function TopologyCanvas({
 
   const filterClauses = useMemo(() => parseFilter(filterText), [filterText])
 
-  // Positions: tier layout, overridden by the saved layout at device level.
+  // Every level is freely draggable; positions are stored per scene
+  // (level × orientation) so the fabric globe, the stacks and the
+  // switches are independent objects. Files from another generator are
+  // parsed but not applied.
+  const sceneKey = `${levelKey(level)}|${orientation}`
+  const savedForScene = useMemo(() => {
+    const out = new Map<string, { x: number; y: number }>()
+    if (layoutFile?.generator !== TOPOLOGY_LAYOUT_GENERATOR) return out
+    for (const p of layoutFile.scene_positions) {
+      if (p.scene === sceneKey) out.set(p.node_id, { x: p.x, y: p.y })
+    }
+    return out
+  }, [layoutFile, sceneKey])
+
   const positions = useMemo(() => {
     const auto = layoutScene(scene.nodes, orientation)
-    const usable = layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR
-    if (level.kind === 'devices' && layoutFile && usable && orientation === 'vertical') {
-      for (const p of layoutFile.positions) {
-        if (auto.has(p.device_id)) auto.set(p.device_id, { x: p.x, y: p.y })
-      }
-    }
+    for (const [id, p] of savedForScene) if (auto.has(id)) auto.set(id, p)
     return auto
-  }, [scene.nodes, orientation, level, layoutFile])
+  }, [scene.nodes, orientation, savedForScene])
+
+  const sceneIsCustom = [...savedForScene.keys()].some((id) => scene.nodes.some((n) => n.id === id))
 
   // ── Scene → react-flow ──────────────────────────────────────────────
   useEffect(() => {
@@ -225,7 +254,7 @@ function TopologyCanvas({
       type: 'tile',
       position: positions.get(n.id) ?? { x: 0, y: 0 },
       data: { scene: n, dimmed: isDimmed(n) },
-      draggable: editMode && level.kind === 'devices' && n.kind === 'device',
+      draggable: true,
       sourcePosition: vertical ? Position.Bottom : Position.Right,
       targetPosition: vertical ? Position.Top : Position.Left,
       width: TILE_W,
@@ -253,19 +282,15 @@ function TopologyCanvas({
     })
     setNodes(rfNodes)
     setEdges(rfEdges)
-  }, [scene, positions, orientation, editMode, level, filterClauses, graph.nodes, setNodes, setEdges])
+  }, [scene, positions, orientation, filterClauses, graph.nodes, setNodes, setEdges])
 
   // Frame the graph whenever the level or orientation changes — once the
   // new tiles have been measured, otherwise fitView sees an empty bounds.
-  const frameKey = `${level.kind}:${level.kind === 'fabrics' ? '' : level.fabricId}:${orientation}`
   useEffect(() => {
     if (!nodesInitialized) return
-    const t = window.setTimeout(
-      () => fitView({ padding: 0.12, duration: 300, maxZoom: 1.25 }),
-      20
-    )
+    const t = window.setTimeout(() => fitView(FIT), 20)
     return () => window.clearTimeout(t)
-  }, [frameKey, nodesInitialized, fitView])
+  }, [sceneKey, nodesInitialized, fitView])
 
   // ── Navigation ──────────────────────────────────────────────────────
   const goTo = useCallback((next: SceneLevel) => {
@@ -336,51 +361,74 @@ function TopologyCanvas({
     [selectedEdgeId, scene.edges]
   )
 
-  // ── Freeform layout persistence (device level only) ────────────────
+  // ── Layout persistence ──────────────────────────────────────────────
   const nodesRef = useRef(nodes)
   useEffect(() => {
     nodesRef.current = nodes
   }, [nodes])
 
-  const persistPositions = useCallback(async () => {
-    try {
-      const now = new Date().toISOString()
-      const kept = new Map<string, { x: number; y: number }>()
-      // Positions from the old (v1.0) layout engine are a different geometry — drop them.
-      if (layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR) {
-        for (const p of layoutFile.positions) kept.set(p.device_id, { x: p.x, y: p.y })
+  const writeLayout = useCallback(
+    async (scenePositions: TopologyScenePosition[]) => {
+      try {
+        if (scenePositions.length === 0) {
+          await deleteTopologyLayout(projectPath)
+          setLayoutFile(null)
+          return
+        }
+        const now = new Date().toISOString()
+        const next: TopologyLayoutFile = {
+          schema_version: 1,
+          source: 'user',
+          seeded_at: layoutFile?.seeded_at ?? now,
+          forked_at: layoutFile?.forked_at ?? now,
+          positions: [],
+          scene_positions: scenePositions,
+          generator: TOPOLOGY_LAYOUT_GENERATOR
+        }
+        await saveTopologyLayout(projectPath, next)
+        setLayoutFile(next)
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e))
       }
-      for (const n of nodesRef.current) {
-        if (n.data.scene.kind === 'device') kept.set(n.id, { x: n.position.x, y: n.position.y })
-      }
-      const next: TopologyLayoutFile = {
-        schema_version: 1,
-        source: 'user',
-        seeded_at: layoutFile?.seeded_at ?? now,
-        forked_at: layoutFile?.forked_at ?? now,
-        positions: [...kept.entries()].map(([device_id, p]) => ({ device_id, x: p.x, y: p.y })),
-        generator: TOPOLOGY_LAYOUT_GENERATOR
-      }
-      await saveTopologyLayout(projectPath, next)
-      setLayoutFile(next)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    }
-  }, [layoutFile, projectPath])
+    },
+    [layoutFile, projectPath]
+  )
+
+  // Entries for other scenes survive; this scene is rewritten from the
+  // live node positions.
+  const persistScene = useCallback(() => {
+    const others =
+      layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR
+        ? layoutFile.scene_positions.filter((p) => p.scene !== sceneKey)
+        : []
+    const mine: TopologyScenePosition[] = nodesRef.current.map((n) => ({
+      scene: sceneKey,
+      node_id: n.id,
+      x: n.position.x,
+      y: n.position.y
+    }))
+    void writeLayout([...others, ...mine])
+  }, [layoutFile, sceneKey, writeLayout])
 
   const onNodeDragStop: OnNodeDrag<TileNode> = useCallback(() => {
-    void persistPositions()
-  }, [persistPositions])
+    persistScene()
+  }, [persistScene])
 
-  const handleResetLayout = useCallback(async () => {
+  // Snap the current level back to the automatic tiered layout.
+  const snapScene = useCallback(() => {
+    const others =
+      layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR
+        ? layoutFile.scene_positions.filter((p) => p.scene !== sceneKey)
+        : []
+    void writeLayout(others)
+    window.setTimeout(() => fitView(FIT), 60)
+  }, [layoutFile, sceneKey, writeLayout, fitView])
+
+  const handleResetAll = useCallback(async () => {
     setResetConfirmOpen(false)
-    try {
-      await deleteTopologyLayout(projectPath)
-      setLayoutFile(null)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    }
-  }, [projectPath])
+    await writeLayout([])
+    window.setTimeout(() => fitView(FIT), 60)
+  }, [writeLayout, fitView])
 
   const nodeTypes: NodeTypes = useMemo(() => ({ tile: TileRenderer }), [])
   const edgeTypes: EdgeTypes = useMemo(() => ({ fan: FanEdgeRenderer }), [])
@@ -398,8 +446,9 @@ function TopologyCanvas({
 
   const spineCount = graph.nodes.filter((n) => n.role === 'spine').length
   const leafCount = graph.nodes.filter((n) => n.role === 'leaf').length
-  const isForked = layoutFile?.source === 'user'
-  const legacyLayout = isForked && layoutFile?.generator !== TOPOLOGY_LAYOUT_GENERATOR
+  const anyCustom =
+    layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR && layoutFile.scene_positions.length > 0
+  const legacyLayout = !!layoutFile && layoutFile.generator !== TOPOLOGY_LAYOUT_GENERATOR
   const canGoUp = parentLevel(level) !== null
   const detailOpen = !!(selectedNode || selectedEdge)
 
@@ -407,14 +456,14 @@ function TopologyCanvas({
     <div className="h-full flex flex-col min-h-0">
       {/* Breadcrumb row */}
       <div className="px-6 pt-3 pb-2 flex items-center gap-2 flex-wrap">
-        <nav className="flex items-center gap-1 text-sm">
+        <nav className="flex items-center gap-1 text-sm uppercase tracking-wider font-semibold">
           {scene.breadcrumb.map((c, i) => {
             const last = i === scene.breadcrumb.length - 1
             return (
               <span key={c.label + i} className="flex items-center gap-1">
                 {i > 0 && <ChevronRight className="size-3.5 text-muted-foreground" />}
                 {last ? (
-                  <span className="font-semibold">{c.label}</span>
+                  <span className="text-primary">{c.label}</span>
                 ) : (
                   <button
                     className="text-muted-foreground hover:text-foreground cursor-pointer"
@@ -427,7 +476,7 @@ function TopologyCanvas({
             )
           })}
         </nav>
-        <span className="text-xs text-muted-foreground ml-2">
+        <span className="text-xs text-muted-foreground ml-2 font-mono">
           {spineCount} spine{spineCount === 1 ? '' : 's'} · {leafCount} lea
           {leafCount === 1 ? 'f' : 'ves'} · {graph.edges.length} link
           {graph.edges.length === 1 ? '' : 's'}
@@ -437,15 +486,21 @@ function TopologyCanvas({
             {graph.orphanDeviceIds.length} orphan{graph.orphanDeviceIds.length === 1 ? '' : 's'}
           </StatusChip>
         )}
-        {isForked && !legacyLayout && <StatusChip status="unknown">Custom layout</StatusChip>}
-        {legacyLayout && (
-          <StatusChip status="unknown">Old layout file ignored — drag or reset to replace</StatusChip>
+        {sceneIsCustom && (
+          <StatusChip status="unknown">
+            Custom layout · this level
+            <button
+              className="ml-2 underline underline-offset-2 hover:text-foreground cursor-pointer"
+              onClick={snapScene}
+            >
+              snap back
+            </button>
+          </StatusChip>
         )}
+        {legacyLayout && <StatusChip status="unknown">Old layout file ignored</StatusChip>}
         <div className="flex-1" />
-        <div className="inline-flex rounded-md border text-xs overflow-hidden">
-          <span className="px-2.5 py-1 bg-accent text-accent-foreground font-medium border-r">
-            Design status
-          </span>
+        <div className="inline-flex border text-[11px] uppercase tracking-wider font-semibold overflow-hidden chamfer-xs">
+          <span className="px-2.5 py-1 bg-primary text-primary-foreground">Design status</span>
           <span className="px-2.5 py-1 text-muted-foreground">
             {aggregate ? 'Aggregated links' : 'Per-cable links'}
           </span>
@@ -457,7 +512,7 @@ function TopologyCanvas({
         <Input
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          placeholder="Filter by attributes — e.g. model=N9K-C93, rack contains R1, leaf 3"
+          placeholder="Filter by attributes — e.g. model=N9K-C93, rack contains R1, smart-sw"
           className="h-9"
         />
         <div className="relative">
@@ -477,16 +532,16 @@ function TopologyCanvas({
               onOrientation={setOrientation}
               aggregate={aggregate}
               onAggregate={setAggregate}
-              editMode={editMode}
-              onEditMode={setEditMode}
-              canReset={isForked}
-              onReset={() => setResetConfirmOpen(true)}
+              sceneIsCustom={sceneIsCustom}
+              onSnapScene={snapScene}
+              anyCustom={anyCustom || legacyLayout}
+              onResetAll={() => setResetConfirmOpen(true)}
               onExpandAll={() => {
                 const f = level.kind === 'fabrics' ? fabrics[0] : fabrics.find((x) => x.id === level.fabricId)
                 if (f) goTo({ kind: 'devices', fabricId: f.id })
               }}
               onCollapse={() => goTo({ kind: 'fabrics' })}
-              onFit={() => fitView({ padding: 0.12, duration: 250 })}
+              onFit={() => fitView(FIT)}
               onLegend={() => setLegendOpen(true)}
             />
           )}
@@ -523,8 +578,8 @@ function TopologyCanvas({
           <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--canvas-grid)" />
         </ReactFlow>
 
-        {/* ND-style control stack */}
-        <div className="absolute bottom-4 right-4 flex flex-col rounded-md border bg-card shadow-sm overflow-hidden">
+        {/* Control stack */}
+        <div className="absolute bottom-4 right-4 flex flex-col border bg-card chamfer-xs overflow-hidden">
           <CtrlButton title="Up one level (Esc)" onClick={goUp} disabled={!canGoUp}>
             <ChevronUp />
           </CtrlButton>
@@ -534,27 +589,21 @@ function TopologyCanvas({
           <CtrlButton title="Zoom out" onClick={() => zoomOut({ duration: 150 })}>
             <Minus />
           </CtrlButton>
-          <CtrlButton title="Fit view" onClick={() => fitView({ padding: 0.12, duration: 250 })}>
+          <CtrlButton title="Fit view" onClick={() => fitView(FIT)}>
             <Maximize2 />
           </CtrlButton>
           <CtrlButton
-            title={editMode ? 'Freeform layout on — click to lock' : 'Edit layout (drag switches)'}
-            active={editMode}
-            onClick={() => setEditMode((v) => !v)}
+            title={sceneIsCustom ? 'Snap this level back to the default layout' : 'Layout is at default — drag any tile to customise'}
+            active={sceneIsCustom}
+            disabled={!sceneIsCustom}
+            onClick={snapScene}
           >
-            <Pencil />
+            <Magnet />
           </CtrlButton>
           <CtrlButton title="Legend" active={legendOpen} onClick={() => setLegendOpen((v) => !v)}>
             <Info />
           </CtrlButton>
         </div>
-
-        {editMode && level.kind !== 'devices' && (
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-md border bg-card px-3 py-1.5 text-xs shadow-sm">
-            Freeform layout applies at the switch level — double-click a fabric, then Spines or
-            Leaves.
-          </div>
-        )}
 
         {/* Slide-in detail pane */}
         <aside
@@ -614,15 +663,15 @@ function TopologyCanvas({
       <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reset saved layout?</AlertDialogTitle>
+            <AlertDialogTitle>Reset every level to default?</AlertDialogTitle>
             <AlertDialogDescription>
-              This deletes <code className="font-mono">topology_layout.yaml</code>. Switch positions
-              go back to the automatic tiered layout.
+              This deletes <code className="font-mono">topology_layout.yaml</code>. Tiles on all
+              levels and both orientations go back to the automatic tiered layout.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleResetLayout}>Reset</AlertDialogAction>
+            <AlertDialogAction onClick={handleResetAll}>Reset all</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -642,13 +691,16 @@ export function TopologyView(props: TopologyViewProps) {
 // Tiles
 // ────────────────────────────────────────────────────────────────────
 
-const STATUS_STYLE: Record<HealthStatus, { icon: string; pill: string; badge: string | null; glyph: string }> = {
-  healthy: { icon: 'text-ok', pill: 'bg-ok-soft', badge: null, glyph: '' },
-  warning: { icon: 'text-warn', pill: 'bg-warn-soft', badge: 'bg-warn', glyph: '–' },
-  minor: { icon: 'text-minor', pill: 'bg-minor-soft', badge: 'bg-minor', glyph: '!' },
-  major: { icon: 'text-major', pill: 'bg-major-soft', badge: 'bg-major', glyph: '!' },
-  critical: { icon: 'text-crit', pill: 'bg-crit-soft', badge: 'bg-crit', glyph: '×' },
-  unknown: { icon: 'text-unknown', pill: 'bg-unknown-soft', badge: 'bg-unknown', glyph: '?' }
+const STATUS_STYLE: Record<
+  HealthStatus,
+  { pill: string; badge: string | null; glyph: string; dot: string }
+> = {
+  healthy: { pill: 'bg-ok-soft text-ok', badge: null, glyph: '', dot: 'bg-ok' },
+  warning: { pill: 'bg-warn-soft text-warn', badge: 'bg-warn', glyph: '–', dot: 'bg-warn' },
+  minor: { pill: 'bg-minor-soft text-minor', badge: 'bg-minor', glyph: '!', dot: 'bg-minor' },
+  major: { pill: 'bg-major-soft text-major', badge: 'bg-major', glyph: '!', dot: 'bg-major' },
+  critical: { pill: 'bg-crit-soft text-crit', badge: 'bg-crit', glyph: '×', dot: 'bg-crit' },
+  unknown: { pill: 'bg-unknown-soft text-unknown', badge: 'bg-unknown', glyph: '?', dot: 'bg-unknown' }
 }
 
 function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodeProps<TileNode>) {
@@ -656,26 +708,44 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
   const s = STATUS_STYLE[n.status]
   const stacked = n.kind === 'group'
   const drillable = n.kind === 'fabric' || n.kind === 'group'
+  const smart = !!n.device?.smart
+  // In the vertical layout spines/IPNs fan their links downward, straight
+  // through a label placed under the tile — so their label sits on top.
+  const vertical = sourcePosition === Position.Bottom || sourcePosition === undefined
+  const labelAbove = vertical && (n.role === 'spine' || n.role === 'ipn')
+  const label = (
+    <div
+      className={cn(
+        'max-w-full truncate px-1.5 py-0.5 text-[11px] font-semibold leading-tight font-mono tracking-tight',
+        labelAbove ? 'mb-2' : 'mt-2',
+        s.pill
+      )}
+    >
+      {n.label}
+    </div>
+  )
   return (
     <div
       className={cn(
         'flex flex-col items-center select-none transition-opacity',
+        labelAbove ? 'justify-end' : 'justify-start',
         data.dimmed && 'opacity-25'
       )}
       style={{ width: TILE_W, height: TILE_H }}
-      title={drillable ? 'Double-click to open' : undefined}
+      title={drillable ? 'Double-click to open · drag to move' : 'Drag to move'}
     >
+      {labelAbove && label}
       <div className="relative">
         {stacked && (
           <>
-            <div className="absolute -top-2 -right-2 size-14 rounded-lg border border-tile-border/70 bg-tile" />
-            <div className="absolute -top-1 -right-1 size-14 rounded-lg border border-tile-border/85 bg-tile" />
+            <div className="absolute -top-2 -right-2 size-14 chamfer-xs border border-tile-border/60 bg-tile" />
+            <div className="absolute -top-1 -right-1 size-14 chamfer-xs border border-tile-border/80 bg-tile" />
           </>
         )}
         <div
           className={cn(
-            'relative size-14 rounded-lg border bg-tile border-tile-border flex items-center justify-center shadow-sm',
-            selected && 'ring-2 ring-primary ring-offset-2 ring-offset-canvas',
+            'relative size-14 chamfer-xs border bg-tile border-tile-border flex items-center justify-center',
+            selected && 'border-hot shadow-[0_0_0_2px_var(--color-hot)]',
             n.kind === 'device' && n.device?.model_id === 'unknown' && 'border-dashed'
           )}
         >
@@ -691,34 +761,33 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
             style={{ opacity: 0, width: 4, height: 4, minWidth: 0, minHeight: 0, border: 0 }}
             isConnectable={false}
           />
-          <span className={cn('size-7', s.icon)}>
+          <span className={cn('size-8 text-tile-icon', smart && 'opacity-55')}>
             <TileIcon kind={n.kind} role={n.role} />
           </span>
-          {s.badge && (
-            <span
-              className={cn(
-                'absolute -top-2 -right-2 size-4 rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-tile',
-                s.badge
-              )}
-            >
-              {s.glyph}
-            </span>
-          )}
-          {stacked && (
-            <span className="absolute -bottom-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-card border text-[10px] font-semibold flex items-center justify-center">
-              {n.count}
+          {smart && (
+            <span className="absolute inset-x-1.5 top-1/2 -translate-y-1/2 h-4 bg-primary text-primary-foreground text-[9px] font-bold tracking-[0.18em] flex items-center justify-center chamfer-xs">
+              DPU
             </span>
           )}
         </div>
-      </div>
-      <div
-        className={cn(
-          'mt-2 max-w-full truncate rounded px-1.5 py-0.5 text-[11px] font-medium leading-tight',
-          s.pill
+        {/* Badges live outside the clipped tile so the chamfer doesn't cut them. */}
+        {s.badge && (
+          <span
+            className={cn(
+              'absolute -top-2 -right-2 size-4 text-[10px] font-bold text-black flex items-center justify-center ring-2 ring-tile z-10',
+              s.badge
+            )}
+          >
+            {s.glyph}
+          </span>
         )}
-      >
-        {n.label}
+        {stacked && (
+          <span className="absolute -bottom-2 -right-2 min-w-5 h-5 px-1 bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center chamfer-xs z-10">
+            {n.count}
+          </span>
+        )}
       </div>
+      {!labelAbove && label}
     </div>
   )
 }
@@ -726,11 +795,25 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
 function TileIcon({ kind, role }: { kind: SceneNode['kind']; role: SceneNode['role'] }) {
   if (kind === 'fabric') return <Globe className="size-full" strokeWidth={1.6} />
   if (kind === 'ipn' || role === 'ipn') return <RouterGlyph />
-  return <SwitchGlyph />
+  if (role === 'spine') return <SpineGlyph />
+  return <LeafGlyph />
 }
 
-// ND's switch glyph: two horizontal arrows with crossing shafts.
-function SwitchGlyph() {
+// Spine: a backbone bar fanning three links down to the leaf tier.
+function SpineGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-full" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="6" />
+      <path d="M12 10v10" />
+      <path d="M12 10L5 20" />
+      <path d="M12 10l7 10" />
+      <path d="M7 7h2M11 7h2M15 7h2" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+// Leaf: ND's switch glyph — two horizontal arrows with crossing shafts.
+function LeafGlyph() {
   return (
     <svg viewBox="0 0 24 24" className="size-full" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 8h14" />
@@ -801,14 +884,14 @@ function FanEdgeRenderer({
         interactionWidth={14}
         style={{
           strokeWidth: selected ? width + 1 : width,
-          stroke: selected ? 'var(--primary)' : 'var(--link)',
-          opacity: selected ? 1 : 0.9
+          stroke: selected ? 'var(--hot)' : 'var(--link)',
+          opacity: selected ? 1 : 0.85
         }}
       />
       {showLabel && (
         <EdgeLabelRenderer>
           <div
-            className="absolute pointer-events-none rounded border bg-card px-1.5 py-0.5 text-[10px] font-medium shadow-sm nodrag nopan"
+            className="absolute pointer-events-none border border-link/50 bg-card px-1.5 py-0.5 text-[10px] font-mono font-semibold text-link chamfer-xs nodrag nopan"
             style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}
           >
             {data?.scene.label}
@@ -854,7 +937,12 @@ function CtrlButton({
 
 function StatusChip({ status, children }: { status: HealthStatus; children: ReactNode }) {
   return (
-    <span className={cn('rounded px-2 py-0.5 text-[11px] font-medium', STATUS_STYLE[status].pill)}>
+    <span
+      className={cn(
+        'px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider chamfer-xs',
+        STATUS_STYLE[status].pill
+      )}
+    >
       {children}
     </span>
   )
@@ -866,10 +954,10 @@ function ActionsMenu({
   onOrientation,
   aggregate,
   onAggregate,
-  editMode,
-  onEditMode,
-  canReset,
-  onReset,
+  sceneIsCustom,
+  onSnapScene,
+  anyCustom,
+  onResetAll,
   onExpandAll,
   onCollapse,
   onFit,
@@ -880,10 +968,10 @@ function ActionsMenu({
   onOrientation(o: Orientation): void
   aggregate: boolean
   onAggregate(v: boolean): void
-  editMode: boolean
-  onEditMode(v: boolean): void
-  canReset: boolean
-  onReset(): void
+  sceneIsCustom: boolean
+  onSnapScene(): void
+  anyCustom: boolean
+  onResetAll(): void
   onExpandAll(): void
   onCollapse(): void
   onFit(): void
@@ -901,15 +989,15 @@ function ActionsMenu({
     }
   }, [onClose])
 
-  const row = 'w-full flex items-center justify-between gap-4 px-3 py-2 text-sm text-left hover:bg-accent cursor-pointer'
+  const row =
+    'w-full flex items-center justify-between gap-4 px-3 py-2 text-sm text-left hover:bg-accent cursor-pointer disabled:opacity-40 disabled:cursor-default'
+  const heading = 'px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.18em] text-primary font-bold'
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 w-64 rounded-md border bg-popover text-popover-foreground shadow-lg z-20 py-1"
+      className="absolute right-0 top-full mt-1 w-64 border bg-popover text-popover-foreground shadow-lg z-20 py-1 chamfer"
     >
-      <div className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-        Layout
-      </div>
+      <div className={heading}>Layout</div>
       <button className={row} onClick={() => onOrientation('vertical')}>
         <span>Vertical (default)</span>
         <Radio on={orientation === 'vertical'} />
@@ -918,16 +1006,20 @@ function ActionsMenu({
         <span>Horizontal</span>
         <Radio on={orientation === 'horizontal'} />
       </button>
-      <div className="my-1 border-t" />
       <button className={row} onClick={() => onAggregate(!aggregate)}>
         <span>Aggregate links</span>
         <Switch on={aggregate} />
       </button>
-      <button className={row} onClick={() => onEditMode(!editMode)}>
-        <span>Freeform layout</span>
-        <Switch on={editMode} />
+      <div className="my-1 border-t" />
+      <div className={heading}>Positions</div>
+      <button className={row} disabled={!sceneIsCustom} onClick={() => { onSnapScene(); onClose() }}>
+        Snap this level to default
+      </button>
+      <button className={cn(row, 'text-destructive')} disabled={!anyCustom} onClick={() => { onResetAll(); onClose() }}>
+        Reset all levels…
       </button>
       <div className="my-1 border-t" />
+      <div className={heading}>View</div>
       <button className={row} onClick={() => { onExpandAll(); onClose() }}>
         Expand to switches
       </button>
@@ -940,14 +1032,6 @@ function ActionsMenu({
       <button className={row} onClick={() => { onLegend(); onClose() }}>
         Legend
       </button>
-      {canReset && (
-        <>
-          <div className="my-1 border-t" />
-          <button className={cn(row, 'text-destructive')} onClick={() => { onReset(); onClose() }}>
-            Reset saved layout…
-          </button>
-        </>
-      )}
     </div>
   )
 }
@@ -962,8 +1046,8 @@ function Radio({ on }: { on: boolean }) {
 
 function Switch({ on }: { on: boolean }) {
   return (
-    <span className={cn('relative inline-block h-4 w-7 rounded-full transition-colors', on ? 'bg-primary' : 'bg-muted-foreground/40')}>
-      <span className={cn('absolute top-0.5 size-3 rounded-full bg-white transition-transform', on ? 'translate-x-3.5' : 'translate-x-0.5')} />
+    <span className={cn('relative inline-block h-4 w-7 transition-colors chamfer-xs', on ? 'bg-primary' : 'bg-muted-foreground/40')}>
+      <span className={cn('absolute top-0.5 size-3 bg-background transition-transform', on ? 'translate-x-3.5' : 'translate-x-0.5')} />
     </span>
   )
 }
@@ -989,14 +1073,14 @@ function DetailPane({
     <div className="p-4 space-y-4">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-base font-semibold truncate">{title}</div>
+          <div className="text-base font-bold uppercase tracking-wider truncate">{title}</div>
           {subtitle && <div className="text-xs font-mono text-muted-foreground truncate">{subtitle}</div>}
         </div>
         <StatusChip status={status}>{statusLabel(status)}</StatusChip>
         <button
           onClick={onClose}
           aria-label="Close"
-          className="size-7 -mr-1 -mt-1 rounded hover:bg-accent flex items-center justify-center cursor-pointer"
+          className="size-7 -mr-1 -mt-1 hover:bg-accent flex items-center justify-center cursor-pointer"
         >
           <X className="size-4" />
         </button>
@@ -1034,19 +1118,31 @@ function NodeDetails({
     return (
       <div className="space-y-3 text-sm">
         {orphan && (
-          <div className="rounded border border-minor bg-minor-soft px-3 py-2 text-xs">
+          <div className="border border-minor bg-minor-soft px-3 py-2 text-xs">
             Referenced by a cable link but missing from the rack layout. Re-generate or re-import
             to re-anchor it.
           </div>
         )}
         {dev.usedPorts.length === 0 && !orphan && node.status === 'warning' && (
-          <div className="rounded border border-warn bg-warn-soft px-3 py-2 text-xs">
+          <div className="border border-warn bg-warn-soft px-3 py-2 text-xs">
             No cable links attached while other {dev.role === 'spine' ? 'spines' : 'leaves'} are
             wired.
           </div>
         )}
+        <KV
+          label="Hostname"
+          value={
+            <span>
+              <span className="font-mono">{dev.label}</span>{' '}
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {dev.hostname_source === 'user' ? 'set in Rack View' : 'auto nickname'}
+              </span>
+            </span>
+          }
+        />
         <KV label="Role" value={dev.role.toUpperCase()} />
         <KV label="Model" value={<span className="font-mono">{dev.model_id}</span>} />
+        {dev.smart && <KV label="Smart switch" value="Yes — integrated DPU" />}
         {dev.pod_index != null && dev.role !== 'leaf' && <KV label="Pod" value={`Pod ${dev.pod_index + 1}`} />}
         <KV label="Rack" value={dev.rack ?? <Dash />} />
         <KV label="RU" value={dev.ru ?? <Dash />} />
@@ -1058,7 +1154,7 @@ function NodeDetails({
           ) : (
             <div className="flex flex-wrap gap-1">
               {dev.usedPorts.map((p) => (
-                <span key={p} className="rounded bg-muted text-muted-foreground text-[10px] font-mono px-1.5 py-0.5">
+                <span key={p} className="bg-muted text-muted-foreground text-[10px] font-mono px-1.5 py-0.5">
                   {p}
                 </span>
               ))}
@@ -1106,14 +1202,14 @@ function NodeDetails({
       {node.kind === 'group' && (
         <div>
           <div className="text-xs text-muted-foreground mb-1">Members</div>
-          <div className="max-h-64 overflow-auto rounded border divide-y">
+          <div className="max-h-64 overflow-auto border divide-y">
             {members.map((m) => (
               <button
                 key={m.id}
                 onClick={() => onSelectDevice(m.id)}
                 className="w-full flex items-center justify-between px-2 py-1.5 text-xs hover:bg-accent text-left cursor-pointer"
               >
-                <span className="truncate">{m.label}</span>
+                <span className="truncate font-mono">{m.label}</span>
                 <span className="text-muted-foreground font-mono">{m.usedPorts.length} ports</span>
               </button>
             ))}
@@ -1165,7 +1261,7 @@ function EdgeDetails({
       <KV label="Total bandwidth" value={`${edge.totalG}G`} />
       <div>
         <div className="text-xs text-muted-foreground mb-1">Connections</div>
-        <div className="max-h-72 overflow-auto rounded border divide-y">
+        <div className="max-h-72 overflow-auto border divide-y">
           {shown.map((l) => (
             <div key={l.id} className="px-2 py-1.5 text-[11px] font-mono flex items-center justify-between gap-2">
               <span className="truncate">{name(l.source)}:{l.sourcePort}</span>
@@ -1188,7 +1284,7 @@ function EdgeDetails({
 function Endpoint({ label, port }: { label: string; port: string }) {
   return (
     <span>
-      <span className="font-medium">{label}</span>{' '}
+      <span className="font-mono">{label}</span>{' '}
       <span className="font-mono text-xs text-muted-foreground">: {port}</span>
     </span>
   )
@@ -1201,7 +1297,7 @@ function Dash() {
 function KV({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 text-sm">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs uppercase tracking-wider text-muted-foreground">{label}</span>
       <span className="text-right">{value}</span>
     </div>
   )
@@ -1217,23 +1313,22 @@ function LegendPane({ onClose }: { onClose(): void }) {
     critical: 'Reserved',
     unknown: 'Insufficient information'
   }
+  const glyph = 'size-5 text-tile-icon'
   return (
     <div className="p-4 space-y-5">
       <div className="flex items-center justify-between">
-        <div className="text-base font-semibold">Topology legend</div>
-        <button onClick={onClose} aria-label="Close" className="size-7 rounded hover:bg-accent flex items-center justify-center cursor-pointer">
+        <div className="text-base font-bold uppercase tracking-wider">Topology legend</div>
+        <button onClick={onClose} aria-label="Close" className="size-7 hover:bg-accent flex items-center justify-center cursor-pointer">
           <X className="size-4" />
         </button>
       </div>
       <section className="space-y-2">
-        <div className="text-sm font-medium">Node health</div>
-        <p className="text-xs text-muted-foreground">
-          A badge is only shown on nodes that need attention.
-        </p>
+        <div className="text-sm font-semibold uppercase tracking-wider text-primary">Node health</div>
+        <p className="text-xs text-muted-foreground">A badge is only shown on nodes that need attention.</p>
         <ul className="space-y-1.5 text-sm">
           {statuses.map((s) => (
             <li key={s} className="flex items-center gap-2">
-              <span className={cn('size-3.5 rounded-full', STATUS_STYLE[s].badge ?? 'bg-ok')} />
+              <span className={cn('size-3.5', STATUS_STYLE[s].dot)} />
               <span className="w-16">{statusLabel(s)}</span>
               <span className="text-xs text-muted-foreground">{meaning[s]}</span>
             </li>
@@ -1241,31 +1336,48 @@ function LegendPane({ onClose }: { onClose(): void }) {
         </ul>
       </section>
       <section className="space-y-2">
-        <div className="text-sm font-medium">Node type</div>
+        <div className="text-sm font-semibold uppercase tracking-wider text-primary">Node type</div>
         <ul className="space-y-2 text-sm">
-          <li className="flex items-center gap-2"><span className="size-5 text-ok"><Globe className="size-full" strokeWidth={1.6} /></span> Fabric — double-click to open</li>
-          <li className="flex items-center gap-2"><span className="size-5 text-ok"><SwitchGlyph /></span> Switch (spine or leaf)</li>
+          <li className="flex items-center gap-2"><span className={glyph}><Globe className="size-full" strokeWidth={1.6} /></span> Fabric — double-click to open</li>
+          <li className="flex items-center gap-2"><span className={glyph}><SpineGlyph /></span> Spine switch</li>
+          <li className="flex items-center gap-2"><span className={glyph}><LeafGlyph /></span> Leaf switch</li>
           <li className="flex items-center gap-2">
-            <span className="relative size-5 text-ok">
-              <span className="absolute -top-0.5 -right-0.5 size-5 rounded border border-tile-border bg-tile" />
-              <span className="absolute inset-0 rounded border border-tile-border bg-tile flex items-center justify-center"><SwitchGlyph /></span>
+            <span className="relative size-5 text-tile-icon">
+              <span className="absolute inset-0 opacity-55"><LeafGlyph /></span>
+              <span className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-2 bg-primary text-primary-foreground text-[5px] font-bold flex items-center justify-center">DPU</span>
+            </span>
+            Smart switch (integrated DPU)
+          </li>
+          <li className="flex items-center gap-2">
+            <span className="relative size-5 text-tile-icon">
+              <span className="absolute -top-0.5 -right-0.5 size-5 border border-tile-border bg-tile" />
+              <span className="absolute inset-0 border border-tile-border bg-tile flex items-center justify-center"><LeafGlyph /></span>
             </span>
             Stacked group (Spines / Leaves) — double-click to expand
           </li>
-          <li className="flex items-center gap-2"><span className="size-5 text-ok"><RouterGlyph /></span> IPN router (Multi-Pod)</li>
+          <li className="flex items-center gap-2"><span className={glyph}><RouterGlyph /></span> IPN router (Multi-Pod)</li>
         </ul>
       </section>
       <section className="space-y-2">
-        <div className="text-sm font-medium">Links</div>
+        <div className="text-sm font-semibold uppercase tracking-wider text-primary">Links</div>
         <ul className="space-y-2 text-sm">
           <li className="flex items-center gap-2"><span className="w-8 border-t-2 border-link" /> One cable</li>
           <li className="flex items-center gap-2"><span className="w-8 border-t-4 border-link" /> Aggregated cables (label shows count × speed)</li>
+          <li className="flex items-center gap-2"><span className="w-8 border-t-2 border-hot" /> Selected</li>
         </ul>
       </section>
+      <section className="space-y-2">
+        <div className="text-sm font-semibold uppercase tracking-wider text-primary">Hostnames</div>
+        <p className="text-xs text-muted-foreground">
+          A device label set in Rack View is shown as-is. Otherwise the tile shows a nickname of
+          the model: <code className="font-mono">smart-sw-leaf12</code>,{' '}
+          <code className="font-mono">gx2a-spine1</code>, <code className="font-mono">fx3-leaf30</code>.
+        </p>
+      </section>
       <section className="space-y-1 text-xs text-muted-foreground">
-        <div><kbd className="rounded border bg-muted px-1 font-mono">Esc</kbd> closes panes, then folds up one level.</div>
-        <div>Double-click empty canvas to fold up one level.</div>
-        <div>Filter grammar: <code className="font-mono">model=…</code>, <code className="font-mono">rack contains …</code>, <code className="font-mono">role!=spine</code>, or free text (name).</div>
+        <div>Drag any tile at any level; positions are saved per level. <Magnet className="inline size-3" /> snaps the current level back.</div>
+        <div><kbd className="border bg-muted px-1 font-mono">Esc</kbd> closes panes, then folds up one level. Double-click empty canvas to fold up.</div>
+        <div>Filter grammar: <code className="font-mono">model=…</code>, <code className="font-mono">rack contains …</code>, <code className="font-mono">role!=spine</code>, or free text (hostname).</div>
       </section>
     </div>
   )

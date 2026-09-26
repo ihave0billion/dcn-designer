@@ -350,6 +350,12 @@ export function parentLevel(level: SceneLevel): SceneLevel | null {
   return { kind: 'fabric', fabricId: level.fabricId }
 }
 
+// Stable key for a level — used to store per-level positions.
+export function levelKey(level: SceneLevel): string {
+  if (level.kind === 'fabrics') return 'fabrics'
+  return `${level.kind}:${level.fabricId}`
+}
+
 export function sameLevel(a: SceneLevel, b: SceneLevel): boolean {
   if (a.kind !== b.kind) return false
   if (a.kind === 'fabrics') return true
@@ -364,9 +370,9 @@ export type Orientation = 'vertical' | 'horizontal'
 
 // Tile footprint used by both the layout and the renderer. Width covers
 // the label pill under the 56px icon tile.
-export const TILE_W = 100
-export const TILE_H = 96
-export const TILE_GAP = 18
+export const TILE_W = 124
+export const TILE_H = 100
+export const TILE_GAP = 14
 export const TIER_GAP = 150
 
 export interface Point {

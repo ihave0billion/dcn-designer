@@ -1,12 +1,16 @@
 import { z } from 'zod'
 
 // topology_layout.yaml — per-project node positions for the Topology
-// View (Phase 7). Mirrors the Phase 5/6 fork pattern: when absent, the
-// view runs `elkjs` and shows the auto-layout; the first manual drag
-// writes this file with `source: 'user'` + `forked_at`. Reset deletes
-// the file and the next visit re-runs elkjs.
+// View. Mirrors the Phase 5/6 fork pattern: when absent, the view shows
+// the automatic tiered layout; the first manual drag writes this file
+// with `source: 'user'` + `forked_at`. "Snap to default" for a level
+// removes that level's entries; "Reset all" deletes the file.
 //
-// Phase 7 Q1 scope: only spines + leaves are nodes.
+// v1.2: positions are stored per *scene* (level × orientation) because the
+// hierarchical view lets the user drag tiles at every level — the fabric
+// globe, the Spines/Leaves stacks, and individual switches are all
+// independent objects. `positions` (v1.0, flat elk positions) is kept so
+// old files still parse, but nothing reads it any more.
 
 export const TopologyNodePositionSchema = z.object({
   device_id: z.string().min(1),
@@ -14,6 +18,15 @@ export const TopologyNodePositionSchema = z.object({
   y: z.number().finite()
 })
 export type TopologyNodePosition = z.infer<typeof TopologyNodePositionSchema>
+
+export const TopologyScenePositionSchema = z.object({
+  // e.g. "fabrics|vertical", "fabric:pod-0|horizontal", "devices:fabric|vertical"
+  scene: z.string().min(1),
+  node_id: z.string().min(1),
+  x: z.number().finite(),
+  y: z.number().finite()
+})
+export type TopologyScenePosition = z.infer<typeof TopologyScenePositionSchema>
 
 export const TopologyLayoutFileSchema = z.object({
   schema_version: z.literal(1),
@@ -23,13 +36,14 @@ export const TopologyLayoutFileSchema = z.object({
   seeded_at: z.string().nullable().default(null),
   // ISO timestamp of the first user drag. Null while still in auto state.
   forked_at: z.string().nullable().default(null),
+  // v1.0 flat positions — parsed for compatibility, no longer applied.
   positions: z.array(TopologyNodePositionSchema).default([]),
-  // Which layout engine the positions were saved from. v1.1's ND-style
-  // tiles are a different geometry from the v1.0 elk boxes, so positions
-  // from a file without this marker are ignored (not deleted) until the
-  // user resets or re-drags.
+  // v1.2 per-scene positions.
+  scene_positions: z.array(TopologyScenePositionSchema).default([]),
+  // Which layout engine wrote the file. Tile geometry changes bump this;
+  // files from another generator are ignored (not deleted).
   generator: z.string().nullable().default(null)
 })
-
-export const TOPOLOGY_LAYOUT_GENERATOR = 'nd-tiles-v1'
 export type TopologyLayoutFile = z.infer<typeof TopologyLayoutFileSchema>
+
+export const TOPOLOGY_LAYOUT_GENERATOR = 'cp-tiles-v2'
