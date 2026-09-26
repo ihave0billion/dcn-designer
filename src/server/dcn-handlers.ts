@@ -39,7 +39,7 @@ export const handlers: Record<string, (...args: never[]) => unknown> = {
   'ensure-workspace': async (workspacePath: string) => {
     const root = resolveInRoot(workspacePath)
     const created: string[] = []
-    for (const sub of ['library', 'library/optics', 'library/attachments', 'projects']) {
+    for (const sub of ['library', 'library/optics', 'library/attachments', 'library/visio', 'projects']) {
       const p = join(root, sub)
       if (!existsSync(p)) {
         await fs.mkdir(p, { recursive: true })
@@ -166,7 +166,7 @@ export const handlers: Record<string, (...args: never[]) => unknown> = {
     const entries = await fs.readdir(exportsDir, { withFileTypes: true })
     const out: DcnExportEntry[] = []
     for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.pdf')) continue
+      if (!entry.isFile() || !['.pdf', '.vsdx'].some((ext) => entry.name.endsWith(ext))) continue
       const abs = join(exportsDir, entry.name)
       try {
         const st = await fs.stat(abs)

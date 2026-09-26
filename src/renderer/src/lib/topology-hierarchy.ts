@@ -397,7 +397,10 @@ function chunkBalanced<T>(items: T[], max: number): T[][] {
 
 export function layoutScene(
   nodes: SceneNode[],
-  orientation: Orientation = 'vertical'
+  orientation: Orientation = 'vertical',
+  // Phase 13 — print wants narrower rows than the canvas (a 31-wide row is a
+  // thin strip on Letter); the tab keeps the default.
+  rowMax: number = ROW_MAX
 ): Map<string, Point> {
   const tiers = new Map<number, SceneNode[]>()
   for (const n of nodes) {
@@ -409,7 +412,7 @@ export function layoutScene(
   const rows: SceneNode[][] = []
   for (const k of tierKeys) {
     const sorted = tiers.get(k)!.sort((a, b) => comparePortNames(a.label, b.label))
-    rows.push(...chunkBalanced(sorted, ROW_MAX))
+    rows.push(...chunkBalanced(sorted, rowMax))
   }
 
   const stride = TILE_W + TILE_GAP

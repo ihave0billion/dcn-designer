@@ -30,6 +30,17 @@ export const SwitchCapabilitiesSchema = z.object({
 })
 export type SwitchCapabilities = z.infer<typeof SwitchCapabilitiesSchema>
 
+// Phase 13 — how the Visio exporter draws this model. Both optional: the
+// resolver falls back to the exact Cisco master ("<id> Front"), an alias,
+// a product photo in library/visio/images/, then a generated schematic panel.
+export const VisioHintSchema = z.object({
+  // Master name inside the extracted stencil bundle (library/visio/index.json).
+  master: z.string().nullable().default(null),
+  // Path (relative to <workspace>/library/visio/) of a PNG/JPEG front view.
+  image: z.string().nullable().default(null)
+})
+export type VisioHint = z.infer<typeof VisioHintSchema>
+
 export const SwitchSchema = z.object({
   id: z.string().min(1),
   model_display: z.string().min(1),
@@ -49,7 +60,8 @@ export const SwitchSchema = z.object({
   available_from: z.string().nullable(),
   notes: z.string().nullable(),
   data_sheet_url: z.string().nullable(),
-  attachments: z.array(z.string()).default([])
+  attachments: z.array(z.string()).default([]),
+  visio: VisioHintSchema.optional()
 })
 export type Switch = z.infer<typeof SwitchSchema>
 

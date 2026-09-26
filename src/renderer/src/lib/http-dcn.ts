@@ -159,10 +159,9 @@ const httpDcn: DcnApi = {
 
   writeBinaryFile: async (filePath, data) => {
     if (filePath.startsWith(DOWNLOAD_PREFIX)) {
-      downloadBlob(
-        filePath.slice(DOWNLOAD_PREFIX.length),
-        new Blob([data as BlobPart], { type: 'application/pdf' })
-      )
+      const name = filePath.slice(DOWNLOAD_PREFIX.length)
+      const type = name.endsWith('.vsdx') ? 'application/vnd.ms-visio.drawing' : 'application/pdf'
+      downloadBlob(name, new Blob([data as BlobPart], { type }))
       return
     }
     // Real workspace path — the server owns it, so PUT the bytes there.
@@ -178,7 +177,18 @@ const httpDcn: DcnApi = {
     }
   },
 
+  readBinaryFile: async (filePath) => {
+    const res = await fetch(`/api/read-binary?path=${encodeURIComponent(filePath)}`)
+    if (res.status === 401) sessionEnded(res)
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(payload.error || `Read failed (${res.status})`)
+    }
+    return new Uint8Array(await res.arrayBuffer())
+  },
+
   showSavePdfPicker: async (_title, defaultName) => `${DOWNLOAD_PREFIX}${defaultName || 'export.pdf'}`,
+  showSaveVisioPicker: async (_title, defaultName) => `${DOWNLOAD_PREFIX}${defaultName || 'topology.vsdx'}`,
 
   listExports: (projectPath) => call<DcnExportEntry[]>('list-exports', projectPath),
 

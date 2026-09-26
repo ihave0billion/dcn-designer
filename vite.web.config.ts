@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import { fileURLToPath } from 'node:url'
 import { resolve, dirname } from 'node:path'
+import { readFileSync } from 'node:fs'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -9,11 +10,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // Build config for the self-hosted web target (served by src/server). The Electron
 // desktop build still uses electron.vite.config.ts — this one only differs in that it
 // emits a plain static bundle and flags the renderer to talk HTTP instead of IPC.
+const APP_VERSION = (JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as { version: string }).version
+
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
   base: '/',
   define: {
-    'import.meta.env.VITE_DCN_TARGET': JSON.stringify('web')
+    'import.meta.env.VITE_DCN_TARGET': JSON.stringify('web'),
+    __APP_VERSION__: JSON.stringify(APP_VERSION)
   },
   resolve: {
     alias: {

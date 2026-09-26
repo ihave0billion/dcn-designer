@@ -1,0 +1,261 @@
+import type { TopologyLayoutFile } from '@/schemas/topology-layout'
+import type { TopologyGraph, TopologyRole } from '@/lib/topology-extractor'
+import {
+  buildFabrics,
+  buildScene,
+  TILE_H,
+  TILE_W,
+  type Fabric,
+  type Orientation
+} from '@/lib/topology-hierarchy'
+import { resolveScenePositions } from '@/lib/topology-scene-positions'
+
+// Phase 13 — the PDF Topology page(s), built from the SAME scene geometry
+// as the Topology tab and the Visio export (device level, one page per
+// fabric, positions = auto layout overridden by the user's saved drags).
+// Pure: numbers in scene pixels, no react-pdf import, unit-testable.
+//
+// A device is drawn as its front panel — the rasterised stencil master or
+// product photo when the caller supplies one, a coloured chassis rectangle
+// otherwise — centred in the tile, label above spines/IPNs and below leaves,
+// as on screen. Edges are device-to-device with a count label.
+
+export interface PanelImage {
+  /** data: URL */
+  url: string
+  /** width / height of the raster */
+  aspect: number
+}
+
+/** Tallest a panel may be so the label rows still clear the neighbours. */
+export const MAX_PANEL_H = TILE_H - 24
+
+export interface PdfSceneNode {
+  id: string
+  label: string
+  sublabel: string | null
+  role: TopologyRole | null
+  modelId: string
+  /** Panel rectangle in scene px. */
+  x: number
+  y: number
+  w: number
+  h: number
+  /** Label anchor (centre x, baseline y) and whether it sits above the panel. */
+  labelX: number
+  labelY: number
+  labelAbove: boolean
+  smart: boolean
+  /** data: URL of a PNG/JPEG front view, or null → draw a chassis rect. */
+  image: string | null
+}
+
+export interface PdfSceneEdge {
+  id: string
+  source: string
+  target: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  count: number
+  label: string
+  dashed: boolean
+}
+
+export interface PdfScenePage {
+  title: string
+  subtitle: string
+  fabricId: string
+  width: number
+  height: number
+  nodes: PdfSceneNode[]
+  edges: PdfSceneEdge[]
+  counts: Record<'spine' | 'leaf' | 'ipn', number>
+  /** Set when the wiring would obscure the page; edges are then not drawn. */
+  edgesOmitted: { links: number; pairs: number } | null
+  custom: boolean
+}
+
+export interface PdfSceneOptions {
+  orientation?: Orientation
+  /** model_id → front view. Missing = chassis rectangle. */
+  images?: ReadonlyMap<string, PanelImage>
+  /** RU per model, for the chassis height; default 1. */
+  ruOf?: (modelId: string) => number | null
+  /** Beyond this many device pairs the links are omitted (legibility). */
+  maxEdges?: number
+  /** Tiles per row for the automatic layout on paper (the canvas uses 40). */
+  rowMax?: number
+}
+
+/** 14 tiles across Letter landscape keeps a 15-char hostname legible under each panel. */
+export const PDF_ROW_MAX = 14
+
+/** Panel width as a fraction of the tile; a 19" chassis at the tile's scale. */
+export const PANEL_W = 110
+/** 1RU at the panel's scale (19 in → 110 px ⇒ 1.75 in → ~10 px). */
+export const RU_PX = 10
+export const MIN_PANEL_H = 14
+export const LABEL_GAP = 4
+export const PAGE_PAD = 24
+export const DEFAULT_MAX_EDGES = 400
+
+/** Intersection of the segment centre→target with the axis-aligned rect around centre. */
+export function rectEdgePoint(
+  cx: number,
+  cy: number,
+  hw: number,
+  hh: number,
+  tx: number,
+  ty: number
+): { x: number; y: number } {
+  const dx = tx - cx
+  const dy = ty - cy
+  if (dx === 0 && dy === 0) return { x: cx, y: cy }
+  const sx = dx === 0 ? Infinity : hw / Math.abs(dx)
+  const sy = dy === 0 ? Infinity : hh / Math.abs(dy)
+  const s = Math.min(sx, sy)
+  return { x: cx + dx * s, y: cy + dy * s }
+}
+
+export function buildPdfScenePages(
+  graph: TopologyGraph,
+  fabricName: string,
+  layoutFile: TopologyLayoutFile | null,
+  opts: PdfSceneOptions = {}
+): PdfScenePage[] {
+  const orientation = opts.orientation ?? 'vertical'
+  const maxEdges = opts.maxEdges ?? DEFAULT_MAX_EDGES
+  const fabrics: Fabric[] = buildFabrics(graph, fabricName)
+  const multi = fabrics.length > 1
+  const pages: PdfScenePage[] = []
+
+  for (const fabric of fabrics) {
+    const scene = buildScene(graph, fabrics, { kind: 'devices', fabricId: fabric.id }, { aggregate: true })
+    // Saved drag positions win as-is; the automatic layout is re-wrapped for
+    // paper so a wide fabric becomes rows instead of a thin strip.
+    let { positions, custom } = resolveScenePositions(scene, layoutFile, orientation)
+    if (!custom) {
+      positions = resolveScenePositions(scene, null, orientation, { rowMax: opts.rowMax ?? PDF_ROW_MAX }).positions
+    }
+
+    const nodes: PdfSceneNode[] = []
+    const counts = { spine: 0, leaf: 0, ipn: 0 }
+    for (const n of scene.nodes) {
+      const p = positions.get(n.id) ?? { x: 0, y: 0 }
+      const modelId = n.device?.model_id ?? (n.kind === 'ipn' ? (n.sublabel ?? 'unknown') : 'unknown')
+      const ru = opts.ruOf?.(modelId) ?? 1
+      const img = opts.images?.get(modelId) ?? null
+      let w = PANEL_W
+      let h = Math.max(MIN_PANEL_H, RU_PX * ru)
+      if (img) {
+        // Keep the raster's shape: a front panel is ~11:1, an isometric photo ~1.25:1.
+        h = Math.max(MIN_PANEL_H, w / img.aspect)
+        if (h > MAX_PANEL_H) {
+          h = MAX_PANEL_H
+          w = h * img.aspect
+        }
+      }
+      const cx = p.x + TILE_W / 2
+      const cy = p.y + TILE_H / 2
+      const labelAbove = orientation === 'vertical' && (n.role === 'spine' || n.role === 'ipn')
+      const x = cx - w / 2
+      const y = cy - h / 2
+      if (n.role) counts[n.role] += 1
+      nodes.push({
+        id: n.id,
+        label: n.label,
+        sublabel: n.sublabel,
+        role: n.role,
+        modelId,
+        x,
+        y,
+        w,
+        h,
+        labelX: cx,
+        labelY: labelAbove ? y - LABEL_GAP : y + h + LABEL_GAP,
+        labelAbove,
+        smart: !!n.device?.smart,
+        image: img?.url ?? null
+      })
+    }
+    const byId = new Map(nodes.map((n) => [n.id, n]))
+
+    const edges: PdfSceneEdge[] = []
+    let omitted: PdfScenePage['edgesOmitted'] = null
+    if (scene.edges.length > maxEdges) {
+      omitted = { links: scene.edges.reduce((a, e) => a + e.count, 0), pairs: scene.edges.length }
+    } else {
+      for (const e of scene.edges) {
+        const a = byId.get(e.source)
+        const b = byId.get(e.target)
+        if (!a || !b) continue
+        const acx = a.x + a.w / 2
+        const acy = a.y + a.h / 2
+        const bcx = b.x + b.w / 2
+        const bcy = b.y + b.h / 2
+        const p1 = rectEdgePoint(acx, acy, a.w / 2, a.h / 2, bcx, bcy)
+        const p2 = rectEdgePoint(bcx, bcy, b.w / 2, b.h / 2, acx, acy)
+        edges.push({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          x1: p1.x,
+          y1: p1.y,
+          x2: p2.x,
+          y2: p2.y,
+          count: e.count,
+          label: e.label,
+          dashed: a.role === 'ipn' || b.role === 'ipn'
+        })
+      }
+    }
+
+    // Page extent from the geometry (labels included), padded, origin shifted to 0.
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const n of nodes) {
+      minX = Math.min(minX, n.x)
+      maxX = Math.max(maxX, n.x + n.w)
+      minY = Math.min(minY, n.labelAbove ? n.labelY - 12 : n.y)
+      maxY = Math.max(maxY, n.labelAbove ? n.y + n.h : n.labelY + 12)
+    }
+    if (nodes.length === 0) {
+      minX = minY = 0
+      maxX = maxY = 1
+    }
+    const dx = PAGE_PAD - minX
+    const dy = PAGE_PAD - minY
+    for (const n of nodes) {
+      n.x += dx
+      n.y += dy
+      n.labelX += dx
+      n.labelY += dy
+    }
+    for (const e of edges) {
+      e.x1 += dx
+      e.y1 += dy
+      e.x2 += dx
+      e.y2 += dy
+    }
+
+    pages.push({
+      title: multi ? `Topology — ${fabric.label}` : 'Topology',
+      subtitle: custom
+        ? 'Device level, positions as arranged on the Topology tab'
+        : 'Device level, automatic layout (Topology tab)',
+      fabricId: fabric.id,
+      width: maxX - minX + PAGE_PAD * 2,
+      height: maxY - minY + PAGE_PAD * 2,
+      nodes,
+      edges,
+      counts,
+      edgesOmitted: omitted,
+      custom
+    })
+  }
+  return pages
+}

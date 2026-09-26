@@ -40,3 +40,4 @@ AGENTS.md
 data/
 DCN-Designer/
 *.workspace/
+__pycache__/

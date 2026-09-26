@@ -243,6 +243,16 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     return
   }
 
+  // Phase 13 — the Visio exporter reads stencil masters (EMF media) and product
+  // photos from <workspace>/library/visio/. Same jail as write-binary.
+  if (url.pathname === '/api/read-binary' && req.method === 'GET') {
+    const abs = resolveInRoot(url.searchParams.get('path') || '')
+    const bytes = await fs.readFile(abs)
+    res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.byteLength })
+    res.end(bytes)
+    return
+  }
+
   if (url.pathname === '/api/health') {
     sendJson(res, 200, { ok: true, workspace: WORKSPACE_ROOT })
     return

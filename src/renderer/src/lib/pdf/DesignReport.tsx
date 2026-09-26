@@ -1,4 +1,4 @@
-import { Document, Page, View, Text, Svg, Rect, Line, type DocumentProps } from '@react-pdf/renderer'
+import { Document, Page, View, Text, Image, Svg, Rect, Line, type DocumentProps } from '@react-pdf/renderer'
 import type { ReactElement } from 'react'
 import type { DesignResult, OpticsBomScenario, SolverWarning } from '@domain'
 import { DEFAULT_SWITCH_POWER_W } from '@domain'
@@ -9,7 +9,9 @@ import type { TopologyGraph } from '@/lib/topology-extractor'
 import { buildCableBom, unresolvedLabel, type CableBom } from '@/lib/cable-bom'
 import { buildDeviceBom, type DeviceBom } from '@/lib/device-bom'
 import { findCandidate } from '@/lib/design-projection'
-import { layoutTopologyForPdf, type PdfTopologyLayout } from './topology-svg'
+import type { TopologyLayoutFile } from '@/schemas/topology-layout'
+import { buildPdfScenePages, type PdfScenePage } from './topology-scene'
+import type { PanelImages } from './panel-images'
 import { COLORS, PAGE_MARGIN, styles } from './styles'
 import { pdfText } from './text'
 
@@ -28,6 +30,10 @@ export interface DesignReportInput {
   links: CableLink[]
   switches: Switch[]
   topology: TopologyGraph
+  /** Phase 13 — the Topology tab's saved drag positions (null = auto layout). */
+  topologyLayout?: TopologyLayoutFile | null
+  /** Phase 13 — model_id → rasterised front panel / product photo for the topology page. */
+  panelImages?: PanelImages
   /** ISO timestamp, passed in rather than read from the clock so the
    *  document is a pure function of its input (and testable). */
   generatedAt: string
@@ -651,83 +657,120 @@ function RackPage({
 
 // Landscape LETTER minus margins.
 const TOPO_W = 792 - PAGE_MARGIN * 2
-const TOPO_MAX_H = 612 - PAGE_MARGIN * 2 - 48
+const TOPO_MAX_H = 612 - PAGE_MARGIN * 2 - 64
+// Tile width in scene px (lib/topology-hierarchy TILE_W) — for the label-legibility rule.
+const PANEL_TILE_W = 124
 
 function TopologyPage({
   projectName,
-  layout
+  page
 }: {
   projectName: string
-  layout: PdfTopologyLayout
+  page: PdfScenePage | null
 }): ReactElement {
-  // viewBox does the scaling: the layout is computed at natural size and the
-  // Svg box shrinks it to fit the page if the fabric is tall.
-  const scale = layout.height > TOPO_MAX_H ? TOPO_MAX_H / layout.height : 1
-  const drawH = Math.max(layout.height * scale, 1)
-  const drawW = layout.width * scale
+  // Phase 13 — the Topology tab's device level, tile for tile (see
+  // lib/pdf/topology-scene.ts). The scene is laid out in screen pixels and
+  // scaled to the page; rasters (front.png of a stencil master, or a product
+  // photo) are overlaid as absolutely positioned Images on top of the Svg.
+  const scale = page ? Math.min(TOPO_W / page.width, TOPO_MAX_H / page.height, 1) : 1
+  const drawW = page ? page.width * scale : 0
+  const drawH = page ? page.height * scale : 0
+  // Labels are drawn at a fixed point size; when a tile is narrower than the
+  // shortest hostname we drop them rather than print a smear.
+  const labelPt = 6.5
+  const showLabels = !!page && PANEL_TILE_W * scale >= 26
+  const fontPx = labelPt / scale
 
   return (
     <Page size="LETTER" orientation="landscape" style={styles.page}>
-      <Text style={styles.h2}>Topology</Text>
-      {layout.nodes.length === 0 ? (
+      <Text style={styles.h2}>{page ? pdfText(page.title) : 'Topology'}</Text>
+      {!page || page.nodes.length === 0 ? (
         <Empty>No topology to draw — generate a design first.</Empty>
       ) : (
         <>
-          <Svg width={drawW} height={drawH} viewBox={`0 0 ${layout.width} ${layout.height}`}>
-            {layout.pods.map((p) => (
-              <Rect
-                key={`pod-${p.pod_index}`}
-                x={p.x}
-                y={p.y}
-                width={p.w}
-                height={p.h}
-                fill="none"
-                stroke={COLORS.rule}
-                strokeWidth={0.8}
-              />
-            ))}
-            {layout.edges.map((e) => (
-              <Line
-                key={e.id}
-                x1={e.x1}
-                y1={e.y1}
-                x2={e.x2}
-                y2={e.y2}
-                stroke={COLORS.faint}
-                strokeWidth={0.3}
-              />
-            ))}
-            {layout.nodes.map((n) => (
-              <Rect
-                key={n.id}
-                x={n.x}
-                y={n.y}
-                width={n.w}
-                height={n.h}
-                fill={ROLE_COLOR[n.role] ?? COLORS.muted}
-                stroke="none"
-              />
-            ))}
-          </Svg>
+          <Text style={styles.note}>{page.subtitle}</Text>
+          <View style={{ position: 'relative', width: drawW, height: drawH, marginTop: 4 }}>
+            <Svg
+              width={drawW}
+              height={drawH}
+              viewBox={`0 0 ${page.width} ${page.height}`}
+              style={{ position: 'absolute', left: 0, top: 0 }}
+            >
+              {page.edges.map((e) => (
+                <Line
+                  key={e.id}
+                  x1={e.x1}
+                  y1={e.y1}
+                  x2={e.x2}
+                  y2={e.y2}
+                  stroke={COLORS.faint}
+                  strokeWidth={Math.max(0.6, 0.5 / scale)}
+                  strokeDasharray={e.dashed ? '4 3' : undefined}
+                />
+              ))}
+              {page.nodes.map((n) =>
+                n.image ? null : (
+                  <Rect
+                    key={n.id}
+                    x={n.x}
+                    y={n.y}
+                    width={n.w}
+                    height={n.h}
+                    fill={ROLE_COLOR[n.role ?? ''] ?? COLORS.muted}
+                    stroke={COLORS.rule}
+                    strokeWidth={0.5}
+                  />
+                )
+              )}
+              {showLabels &&
+                page.nodes.map((n) => (
+                  <Text
+                    key={`${n.id}-label`}
+                    x={n.labelX}
+                    y={n.labelAbove ? n.labelY : n.labelY + fontPx}
+                    textAnchor="middle"
+                    style={{ fontSize: fontPx, fontFamily: 'Helvetica', fill: COLORS.text }}
+                  >
+                    {pdfText(n.label)}
+                  </Text>
+                ))}
+            </Svg>
+            {page.nodes.map((n) =>
+              n.image ? (
+                <Image
+                  key={`${n.id}-img`}
+                  src={n.image}
+                  style={{
+                    position: 'absolute',
+                    left: n.x * scale,
+                    top: n.y * scale,
+                    width: n.w * scale,
+                    height: n.h * scale
+                  }}
+                />
+              ) : null
+            )}
+          </View>
           <View style={styles.legend}>
             {(['spine', 'ipn', 'leaf'] as const).map((role) => (
               <View style={styles.legendItem} key={role}>
                 <View style={[styles.legendSwatch, { backgroundColor: ROLE_COLOR[role] }]} />
                 <Text style={styles.legendLabel}>
-                  {role} ({layout.counts[role]})
+                  {role} ({page.counts[role]})
                 </Text>
               </View>
             ))}
           </View>
-          {layout.edges_omitted ? (
+          {page.edgesOmitted ? (
             <Text style={styles.note}>
-              {layout.edges_omitted.links} cable links ({layout.edges_omitted.pairs} device pairs)
-              are not drawn — at this fabric size the wiring obscures the diagram. See the Links
-              view or the exported CSV for the full port map.
+              {page.edgesOmitted.links} cable links ({page.edgesOmitted.pairs} device pairs) are not
+              drawn — at this fabric size the wiring obscures the diagram. See the Links view, the
+              exported CSV, or the Visio export for the full port map.
             </Text>
           ) : (
             <Text style={styles.note}>
               Lines are device-to-device; each stands for one or more port-level cable links.
+              {showLabels ? '' : ' Hostnames omitted at this scale — see the Visio export.'}
             </Text>
           )}
         </>
@@ -817,12 +860,18 @@ export function DesignReport({
   links,
   switches,
   topology,
+  topologyLayout,
+  panelImages,
   generatedAt
 }: DesignReportInput): ReactElement<DocumentProps> {
   const deviceBom = buildDeviceBom(design, switches)
   const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m })
-  const topoLayout = layoutTopologyForPdf(topology, { width: TOPO_W })
   const projectName = requirements.project.name
+  const ruById = new Map(switches.map((s) => [s.id, s.ru]))
+  const topoPages = buildPdfScenePages(topology, projectName, topologyLayout ?? null, {
+    images: panelImages,
+    ruOf: (id) => ruById.get(id) ?? null
+  })
 
   return (
     <Document
@@ -842,7 +891,11 @@ export function DesignReport({
         cableTrayM={requirements.cable_tray_m}
       />
       <RackPage projectName={projectName} design={design} />
-      <TopologyPage projectName={projectName} layout={topoLayout} />
+      {topoPages.length === 0 ? (
+        <TopologyPage projectName={projectName} page={null} />
+      ) : (
+        topoPages.map((pg) => <TopologyPage key={pg.fabricId} projectName={projectName} page={pg} />)
+      )}
       <NotesPage projectName={projectName} design={design} />
     </Document>
   )

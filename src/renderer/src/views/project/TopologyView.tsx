@@ -74,8 +74,6 @@ import {
   buildFabrics,
   buildScene,
   drillInto,
-  layoutScene,
-  levelKey,
   matchesFilter,
   parentLevel,
   parseFilter,
@@ -90,6 +88,7 @@ import {
   type SceneNode
 } from '@/lib/topology-hierarchy'
 import { cn } from '@/lib/utils'
+import { resolveScenePositions, sceneKeyFor } from '@/lib/topology-scene-positions'
 
 interface TopologyViewProps {
   projectPath: string
@@ -220,23 +219,11 @@ function TopologyCanvas({
   // (level × orientation) so the fabric globe, the stacks and the
   // switches are independent objects. Files from another generator are
   // parsed but not applied.
-  const sceneKey = `${levelKey(level)}|${orientation}`
-  const savedForScene = useMemo(() => {
-    const out = new Map<string, { x: number; y: number }>()
-    if (layoutFile?.generator !== TOPOLOGY_LAYOUT_GENERATOR) return out
-    for (const p of layoutFile.scene_positions) {
-      if (p.scene === sceneKey) out.set(p.node_id, { x: p.x, y: p.y })
-    }
-    return out
-  }, [layoutFile, sceneKey])
-
-  const positions = useMemo(() => {
-    const auto = layoutScene(scene.nodes, orientation)
-    for (const [id, p] of savedForScene) if (auto.has(id)) auto.set(id, p)
-    return auto
-  }, [scene.nodes, orientation, savedForScene])
-
-  const sceneIsCustom = [...savedForScene.keys()].some((id) => scene.nodes.some((n) => n.id === id))
+  const sceneKey = sceneKeyFor(level, orientation)
+  const { positions, custom: sceneIsCustom } = useMemo(
+    () => resolveScenePositions(scene, layoutFile, orientation),
+    [scene, layoutFile, orientation]
+  )
 
   // ── Scene → react-flow ──────────────────────────────────────────────
   useEffect(() => {

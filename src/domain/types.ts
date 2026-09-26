@@ -69,7 +69,11 @@ export const IpnRouterSchema = z.object({
     mpls_handoff: z.boolean().optional()
   }),
   availability: z.string().optional(),
-  notes: z.string().optional()
+  notes: z.string().optional(),
+  // Phase 13 — Visio export hints (see renderer/schemas/switches.ts VisioHintSchema)
+  visio: z
+    .object({ master: z.string().nullable().default(null), image: z.string().nullable().default(null) })
+    .optional()
 })
 export type IpnRouterFileEntry = z.infer<typeof IpnRouterSchema>
 

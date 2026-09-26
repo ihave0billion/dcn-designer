@@ -237,6 +237,28 @@ export function SwitchEditDialog({ open, onOpenChange, initial, existingIds, onS
             </Field>
           </div>
 
+          {/* Phase 13 — Visio export hints. Blank = automatic resolution. */}
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Visio master (override)">
+              <Input
+                placeholder={`${s.id || 'N9K-…'} Front`}
+                value={s.visio?.master ?? ''}
+                onChange={(e) =>
+                  update('visio', { master: e.target.value || null, image: s.visio?.image ?? null })
+                }
+              />
+            </Field>
+            <Field label="Visio front-view image (library/visio/…)">
+              <Input
+                placeholder="images/N9K-….png"
+                value={s.visio?.image ?? ''}
+                onChange={(e) =>
+                  update('visio', { master: s.visio?.master ?? null, image: e.target.value || null })
+                }
+              />
+            </Field>
+          </div>
+
           <Field label="ACI note">
             <Textarea
               value={s.aci_note ?? ''}

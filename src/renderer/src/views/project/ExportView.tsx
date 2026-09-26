@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Download, FileText, Loader2, RefreshCw } from 'lucide-react'
+import { Download, FileText, Loader2, RefreshCw, Shapes } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -16,8 +16,19 @@ import type { Switch } from '@/schemas/switches'
 import type { CableLink } from '@/schemas/cable-links'
 import type { DcnExportEntry } from '../../../../preload/types'
 import type { DesignResult } from '@domain'
-import { loadCableLinks, loadSwitchesFile } from '@/lib/library-io'
+import {
+  loadCableLinks,
+  loadIpnRouters,
+  loadSwitchesFile,
+  loadTopologyLayout,
+  type IpnRouterFileEntry
+} from '@/lib/library-io'
+import type { TopologyLayoutFile } from '@/schemas/topology-layout'
 import { extractTopology } from '@/lib/topology-extractor'
+import { applyNicknames } from '@/lib/device-nickname'
+import { buildFabrics } from '@/lib/topology-hierarchy'
+import { exportTopologyVisio, visioExportFileName } from '@/lib/visio/export-visio'
+import { loadPanelImages } from '@/lib/pdf/panel-images'
 import { buildCableBom } from '@/lib/cable-bom'
 import { buildDeviceBom } from '@/lib/device-bom'
 import { exportFileName, renderDesignReportPdf } from '@/lib/pdf/render'
@@ -65,6 +76,18 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
   const [design, setDesign] = useState<DesignResult | null>(null)
   const [links, setLinks] = useState<CableLink[]>([])
   const [switches, setSwitches] = useState<Switch[]>([])
+  // Phase 13 — Visio export inputs + the substitution log of the last run.
+  const [ipnRouters, setIpnRouters] = useState<IpnRouterFileEntry[]>([])
+  const [layoutFile, setLayoutFile] = useState<TopologyLayoutFile | null>(null)
+  const [visioBusy, setVisioBusy] = useState(false)
+  const [visioReport, setVisioReport] = useState<{
+    substitutions: string[]
+    problems: string[]
+    pageTitles: string[]
+    sheets: string[]
+    noBundle: boolean
+    savedTo: string | null
+  } | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [exports, setExports] = useState<DcnExportEntry[]>([])
   const [busy, setBusy] = useState(false)
@@ -94,12 +117,16 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
       loadCableLinks(projectPath).catch(() => null),
       loadSwitchesFile(workspacePath)
         .then((f) => f.switches)
-        .catch(() => [] as Switch[])
-    ]).then(([d, linkFile, sw]) => {
+        .catch(() => [] as Switch[]),
+      loadIpnRouters(workspacePath).catch(() => [] as IpnRouterFileEntry[]),
+      loadTopologyLayout(projectPath).catch(() => null)
+    ]).then(([d, linkFile, sw, ipn, layout]) => {
       if (cancelled) return
       setDesign(d)
       setLinks(linkFile?.links ?? [])
       setSwitches(sw)
+      setIpnRouters(ipn)
+      setLayoutFile(layout)
       setLoaded(true)
     })
     void refreshExports()
@@ -108,19 +135,39 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
     }
   }, [workspacePath, projectPath, refreshExports])
 
+  // The topology graph the Topology tab draws: nicknames applied, smart
+  // switches flagged. Both exporters take this same graph.
+  const topologyGraph = useCallback(() => {
+    if (!design) return null
+    const smartModels = new Set(
+      switches.filter((s) => s.capabilities.smart_switch || s.capabilities.dpu_integrated).map((s) => s.id)
+    )
+    return applyNicknames(extractTopology(design, links), smartModels)
+  }, [design, links, switches])
+
   const build = useCallback(async (): Promise<{ bytes: Uint8Array; name: string }> => {
-    if (!design) throw new Error('No design to export')
+    const graph = topologyGraph()
+    if (!design || !graph) throw new Error('No design to export')
     const generatedAt = new Date().toISOString()
+    // Phase 13 — front panels for the topology page come from the stencil
+    // bundle (rasterised masters / photos); absent bundle = chassis rectangles.
+    const panelImages = workspacePath
+      ? await loadPanelImages(workspacePath, graph.nodes.map((n) => n.model_id), switches, ipnRouters).catch(
+          () => new Map()
+        )
+      : new Map()
     const bytes = await renderDesignReportPdf({
       requirements,
       design,
       links,
       switches,
-      topology: extractTopology(design, links),
+      topology: graph,
+      topologyLayout: layoutFile,
+      panelImages,
       generatedAt
     })
     return { bytes, name: exportFileName(requirements.project.name, generatedAt) }
-  }, [design, links, requirements, switches])
+  }, [design, links, requirements, switches, topologyGraph, workspacePath, ipnRouters, layoutFile])
 
   const handleExport = useCallback(async () => {
     setBusy(true)
@@ -138,6 +185,63 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
       setBusy(false)
     }
   }, [build, projectPath, refreshExports])
+
+  // Phase 13 — Visio. Same nickname + fabric partition as the Topology tab,
+  // so the drawing is the tab's device level, tile for tile.
+  const buildVisio = useCallback(async () => {
+    const graph = topologyGraph()
+    if (!design || !workspacePath || !graph) throw new Error('No design to export')
+    const generatedAt = new Date().toISOString()
+    const fabrics = buildFabrics(graph, requirements.project.name)
+    const result = await exportTopologyVisio({
+      workspacePath,
+      projectName: requirements.project.name,
+      customer: requirements.project.customer,
+      generatedAt,
+      graph,
+      fabrics,
+      layoutFile,
+      switches,
+      ipnRouters,
+      appVersion: __APP_VERSION__
+    })
+    return { ...result, name: visioExportFileName(requirements.project.name, generatedAt) }
+  }, [design, workspacePath, switches, requirements, layoutFile, ipnRouters, topologyGraph])
+
+  const handleExportVisio = useCallback(
+    async (saveCopy: boolean) => {
+      setVisioBusy(true)
+      setErr(null)
+      try {
+        const r = await buildVisio()
+        let savedTo: string | null = null
+        if (saveCopy) {
+          const target = await window.dcn.showSaveVisioPicker('Export Visio topology', r.name)
+          if (target) {
+            await window.dcn.writeBinaryFile(target, r.bytes)
+            savedTo = target
+          }
+        } else {
+          savedTo = `${projectPath}/exports/${r.name}`
+          await window.dcn.writeBinaryFile(savedTo, r.bytes)
+          await refreshExports()
+        }
+        setVisioReport({
+          substitutions: r.substitutions,
+          problems: r.problems,
+          pageTitles: r.pageTitles,
+          sheets: r.sheets,
+          noBundle: r.noBundle,
+          savedTo
+        })
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e))
+      } finally {
+        setVisioBusy(false)
+      }
+    },
+    [buildVisio, projectPath, refreshExports]
+  )
 
   const handleSaveCopy = useCallback(async () => {
     setBusy(true)
@@ -241,6 +345,72 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
               )}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Export Visio topology</CardTitle>
+          <CardDescription>
+            A native, editable <code className="font-mono">.vsdx</code> of the expanded topology exactly
+            as the Topology tab draws it — every switch at its position, every link, port labels —
+            using official Cisco stencil masters where the library has one.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => void handleExportVisio(false)} disabled={visioBusy || busy}>
+              {visioBusy ? <Loader2 className="animate-spin" /> : <Shapes />}
+              {visioBusy ? 'Drawing…' : 'Export Visio'}
+            </Button>
+            <Button variant="outline" onClick={() => void handleExportVisio(true)} disabled={visioBusy || busy}>
+              <Download />
+              Save a copy…
+            </Button>
+          </div>
+          {visioReport && (
+            <div className="space-y-2 text-sm">
+              {visioReport.savedTo && (
+                <p className="text-muted-foreground">
+                  Saved to <span className="font-mono">{visioReport.savedTo}</span> ·{' '}
+                  {visioReport.pageTitles.length} page{visioReport.pageTitles.length === 1 ? '' : 's'}
+                  {visioReport.sheets.length > 0 ? ` (${visioReport.sheets.join('; ')})` : ''}
+                </p>
+              )}
+              {visioReport.noBundle && (
+                <p className="text-xs text-amber-600 dark:text-amber-500">
+                  No stencil bundle in <span className="font-mono">library/visio/</span> — every switch was
+                  drawn as a schematic panel. Run <span className="font-mono">scripts/visio/extract-masters.py</span>{' '}
+                  against the Cisco stencil packs to get real stencil masters.
+                </p>
+              )}
+              {visioReport.substitutions.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium mb-1">Substitutions ({visioReport.substitutions.length})</h3>
+                  <ul className="text-xs text-muted-foreground space-y-0.5 list-disc pl-4">
+                    {visioReport.substitutions.map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {visioReport.problems.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium mb-1 text-amber-600 dark:text-amber-500">
+                    Layout checks ({visioReport.problems.length})
+                  </h3>
+                  <ul className="text-xs text-muted-foreground space-y-0.5 list-disc pl-4">
+                    {visioReport.problems.map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {visioReport.substitutions.length === 0 && visioReport.problems.length === 0 && !visioReport.noBundle && (
+                <p className="text-xs text-muted-foreground">Every device used its exact Cisco stencil master. No layout problems.</p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

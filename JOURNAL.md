@@ -24,6 +24,29 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-09-26 — Phase 13: Visio export + PDF topology on one scene
+
+**Real-Visio check pending.** The `.vsdx` writer is a TypeScript port of the
+`claude-visio-diagrams` builder and reproduces every part that made that skill's files open
+in Visio (docProps, windows.xml, `U='IN'`, no empty `<Text/>`, group-master skeletons), but
+LibreOffice is not Visio: open the first export from the running app on the work MacBook
+before trusting it. If it fails, bisect with the skill's `examples/visio_open_bisect.py`.
+
+**Stencil coverage gaps (schematic fallback):** N9336C-SE1, N9K-C9348D-GX2A,
+N9364E-SP2R-O/-Q, N9396Y12C-SE1, N9396T12C-SE1, N3K-C3548P-XL, N9164E-NS4-O have no master in
+the May-2025 Nexus pack. The SE1U (the model the production project is built on) has only the
+product photo. Check newer packs; a front-view PNG added to `library/visio/images/<sku>.png`
+(and `visio.image` on the model) beats the schematic.
+
+**Nicknames now reach the PDF topology page** (it draws the Topology tab's graph verbatim),
+but Rack View, Links and the PDF BOM still say "Leaf 12 (…)". Same deferral as v1.2 — decide
+the scheme, then move it into `src/domain/rack.ts`.
+
+**LibreOffice stays out of the image** (measured: 885 MiB, 2–3 s per conversion, profile-lock
+serialisation). It is used once per stencil pack, offline, for EMF→PNG. A Visio-faithful PDF
+(stencil art in the PDF) would need a separate render sidecar — not planned.
+
+
 ### 2026-09-26 — Per-level topology positions, chamfer clipping, nickname scope
 
 **Positions are per scene, not per device.** With every hierarchy level draggable, the same

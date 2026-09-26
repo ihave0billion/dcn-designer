@@ -39,7 +39,11 @@ export interface DcnApi {
   // The web adapter has no host filesystem to save into, so its picker returns
   // a `browser-download:` pseudo-path that writeBinaryFile turns into a download.
   writeBinaryFile(filePath: string, data: Uint8Array): Promise<void>
+  // Phase 13 — Visio export reads stencil assets (master XML/EMF, PNG photos)
+  // out of <workspace>/library/visio/. Text parts use readTextFile.
+  readBinaryFile(filePath: string): Promise<Uint8Array>
   showSavePdfPicker(title: string, defaultName: string): Promise<string | null>
+  showSaveVisioPicker(title: string, defaultName: string): Promise<string | null>
   listExports(projectPath: string): Promise<DcnExportEntry[]>
   listOptics(workspacePath: string): Promise<DcnOpticsIndexEntry[]>
   deleteOptics(workspacePath: string, switchId: string): Promise<void>

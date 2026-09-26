@@ -272,7 +272,7 @@ export type { CableLink, CableLinksFile }
 // ────────────────────────────────────────────────────────────────────
 // Topology layout — per project node positions (Phase 7)
 // Lives at <project>/topology_layout.yaml. Absent = auto-layout
-// (elkjs); present with source: 'auto' = elkjs result was persisted;
+// (tiered layout); present with source: 'auto' = auto result was persisted;
 // present with source: 'user' = user has dragged at least one node.
 // ────────────────────────────────────────────────────────────────────
 

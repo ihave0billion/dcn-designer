@@ -64,7 +64,7 @@ function registerIpc(): void {
 
   ipcMain.handle('dcn:ensure-workspace', async (_e, workspacePath: string) => {
     const created: string[] = []
-    for (const sub of ['library', 'library/optics', 'library/attachments', 'projects']) {
+    for (const sub of ['library', 'library/optics', 'library/attachments', 'library/visio', 'projects']) {
       const p = join(workspacePath, sub)
       if (!existsSync(p)) {
         await fs.mkdir(p, { recursive: true })
@@ -211,6 +211,10 @@ function registerIpc(): void {
     await fs.writeFile(filePath, Buffer.from(data))
   })
 
+  ipcMain.handle('dcn:read-binary-file', async (_e, filePath: string) => {
+    return new Uint8Array(await fs.readFile(filePath))
+  })
+
   ipcMain.handle('dcn:show-save-pdf-picker', async (_e, title: string, defaultName: string) => {
     const result = await dialog.showSaveDialog({
       title: title || 'Export PDF',
@@ -224,13 +228,22 @@ function registerIpc(): void {
     return result.filePath
   })
 
+  ipcMain.handle('dcn:show-save-visio-picker', async (_e, title: string, defaultName: string) => {
+    const result = await dialog.showSaveDialog({
+      title: title || 'Export Visio',
+      defaultPath: defaultName || 'topology.vsdx',
+      filters: [{ name: 'Visio drawing', extensions: ['vsdx'] }]
+    })
+    return result.canceled || !result.filePath ? null : result.filePath
+  })
+
   ipcMain.handle('dcn:list-exports', async (_e, projectPath: string) => {
     const exportsDir = join(projectPath, 'exports')
     if (!existsSync(exportsDir)) return []
     const entries = await fs.readdir(exportsDir, { withFileTypes: true })
     const out: Array<{ name: string; path: string; size_bytes: number; created: string }> = []
     for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.pdf')) continue
+      if (!entry.isFile() || !['.pdf', '.vsdx'].some((ext) => entry.name.endsWith(ext))) continue
       const filePath = join(exportsDir, entry.name)
       try {
         const st = await fs.stat(filePath)

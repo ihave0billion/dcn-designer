@@ -388,12 +388,19 @@ export function installMockDcn(): void {
     writeBinaryFile: async (filePath, data) => {
       binaryFiles.set(filePath, data)
     },
+    readBinaryFile: async (filePath) => {
+      const stored = binaryFiles.get(filePath)
+      if (!stored) throw new Error(`[mock] readBinaryFile not handled: ${filePath}`)
+      return stored
+    },
     showSavePdfPicker: async (_title, defaultName) =>
       `/mock-export/${defaultName || 'export.pdf'}`,
+    showSaveVisioPicker: async (_title, defaultName) =>
+      `/mock-export/${defaultName || 'topology.vsdx'}`,
     listExports: async (projectPath) => {
       const prefix = `${projectPath}/exports/`
       return [...binaryFiles.entries()]
-        .filter(([path]) => path.startsWith(prefix) && path.endsWith('.pdf'))
+        .filter(([path]) => path.startsWith(prefix) && (path.endsWith('.pdf') || path.endsWith('.vsdx')))
         .map(([path, bytes]) => ({
           name: path.slice(prefix.length),
           path,

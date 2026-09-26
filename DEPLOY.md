@@ -96,12 +96,35 @@ the bind-mounted workspace, in the same layout the desktop app uses on disk:
 ```
 /mnt/user/appdata/dcn-designer/
 ├── library/          # switches.yaml, servers.yaml, optics/, …
+│   └── visio/        # Phase 13 — extracted Cisco stencil masters + PNGs for the Visio export
 ├── projects/<name>/  # requirements.yaml, design.yaml, …
 └── .uploads/         # scratch for browser uploads; safe to delete
 ```
 
 Because the layout matches, a workspace is portable between desktop and web — copy the
 folder either direction. **Back up this directory**; the image carries no state.
+
+### Visio stencil assets (`library/visio/`)
+
+The Visio export draws switches with official Cisco stencil masters. Those packs are
+Cisco-copyrighted and 90+ MB each, so they are **not** in git or the image — only the
+masters the library needs are extracted, offline, into the workspace:
+
+```bash
+# on the laptop (or any box with docker): downloads the Nexus 9000 pack, extracts the
+# masters for every SKU in seed/switches.yaml + seed/ipn_routers.yaml, rasterises the
+# EMF panels to PNG with LibreOffice, writes <out>/library/visio/
+scripts/visio/fetch-stencils.sh ~/cisco-stencils            # → ~/cisco-stencils/nexus9000/*.vssx
+scripts/visio/extract-in-docker.sh ~/cisco-stencils seed - /tmp/visio-out --clean
+rsync -a /tmp/visio-out/library/visio/ nas:/mnt/user/appdata/dcn-designer/library/visio/
+```
+
+(`<stencil dir> <seed dir> <images dir|-> <out dir>`; pass a folder of `<sku>.png` product
+photos as the third argument to bundle them.) `extract-masters.py` runs on plain python3 too
+(PNGs need `soffice` on PATH). Re-run when
+Cisco publishes a new pack or a model is added to the library. Without the bundle the
+export still works — every device is drawn as a schematic front panel and the Export tab
+says so. Per-model overrides (`visio.master` / `visio.image`) live in the switch editor.
 
 ## Desktop vs. web differences
 

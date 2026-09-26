@@ -2,7 +2,8 @@
 
 A Cisco data-center spine-leaf design tool. Enter the requirements, let the solver size
 spines, leaves, uplinks, optics and racks, then walk the result as an interactive topology
-and export a PDF. Runs as a desktop app (Electron) or self-hosted in a browser.
+and export a PDF report and a native Visio drawing. Runs as a desktop app (Electron) or
+self-hosted in a browser.
 
 ![DCN Designer — Night City theme, hierarchical topology](docs/demo.gif)
 
@@ -20,7 +21,12 @@ and export a PDF. Runs as a desktop app (Electron) or self-hosted in a browser.
   DPU smart switches each get their own glyph; devices without a hostname show a nickname of
   the model (`smart-sw-leaf12`, `gx2a-spine1`).
 - **Summary + PDF.** Counts, BOM totals (switches, optics, cables with tray lengths),
-  validation status, and a printable report with the topology as SVG.
+  validation status, and a printable report whose Topology page is the Topology tab's device
+  level, tile for tile, with real stencil front panels.
+- **Visio export.** A native, editable `.vsdx` of the expanded topology — every switch at its
+  on-screen position, every link, port labels — drawn with official Cisco stencil masters
+  (extracted once into the workspace, see DEPLOY.md), a product photo, or a generated
+  schematic front panel; every substitution is listed in the Export tab.
 - **Library.** Switch, server, optics and IPN router catalogues in YAML; Cisco TMG optics CSV
   importer.
 

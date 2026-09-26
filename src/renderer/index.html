@@ -9,7 +9,7 @@
       data: URI, so it needs to fetch that URI and instantiate the module.
       Neither directive permits remote code — script-src stays 'self' only.
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: data: blob:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: data: blob:; worker-src 'self' blob:" />
     <title>DCN Designer</title>
   </head>
   <body>
