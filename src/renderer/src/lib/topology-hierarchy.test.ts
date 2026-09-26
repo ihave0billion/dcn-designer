@@ -93,9 +93,9 @@ function multiPod(): TopologyGraph {
 
 describe('buildFabrics', () => {
   it('single-pod design is one fabric named after the project (leaf pairing index ignored)', () => {
-    const fabrics = buildFabrics(singlePod(), 'SITE-A')
+    const fabrics = buildFabrics(singlePod(), 'FAB-A')
     expect(fabrics).toHaveLength(1)
-    expect(fabrics[0]).toMatchObject({ id: 'fabric', label: 'SITE-A', podIndex: null })
+    expect(fabrics[0]).toMatchObject({ id: 'fabric', label: 'FAB-A', podIndex: null })
     expect(fabrics[0].spineIds).toEqual(['spine-1', 'spine-2'])
     expect(fabrics[0].leafIds).toEqual(['leaf-1', 'leaf-2', 'leaf-10'])
   })
@@ -111,16 +111,16 @@ describe('buildFabrics', () => {
 describe('buildScene', () => {
   it('fabrics level: one globe tile with the whole design folded into it, no edges', () => {
     const g = singlePod()
-    const scene = buildScene(g, buildFabrics(g, 'SITE-A'), { kind: 'fabrics' }, { aggregate: true })
+    const scene = buildScene(g, buildFabrics(g, 'FAB-A'), { kind: 'fabrics' }, { aggregate: true })
     expect(scene.nodes).toHaveLength(1)
-    expect(scene.nodes[0]).toMatchObject({ kind: 'fabric', label: 'SITE-A', count: 5, status: 'healthy' })
+    expect(scene.nodes[0]).toMatchObject({ kind: 'fabric', label: 'FAB-A', count: 5, status: 'healthy' })
     expect(scene.edges).toEqual([])
     expect(scene.breadcrumb.map((c) => c.label)).toEqual(['All fabrics'])
   })
 
   it('fabric level: Spines + Leaves stacks joined by one aggregated edge', () => {
     const g = singlePod()
-    const scene = buildScene(g, buildFabrics(g, 'SITE-A'), { kind: 'fabric', fabricId: 'fabric' }, { aggregate: true })
+    const scene = buildScene(g, buildFabrics(g, 'FAB-A'), { kind: 'fabric', fabricId: 'fabric' }, { aggregate: true })
     const ids = scene.nodes.map((n) => n.id).sort()
     expect(ids).toEqual([GROUP_ID('fabric', 'leaf'), GROUP_ID('fabric', 'spine')].sort())
     const spines = scene.nodes.find((n) => n.id === GROUP_ID('fabric', 'spine'))!
@@ -132,19 +132,19 @@ describe('buildScene', () => {
       count: 6,
       label: '6 × 400G'
     })
-    expect(scene.breadcrumb.map((c) => c.label)).toEqual(['All fabrics', 'SITE-A'])
+    expect(scene.breadcrumb.map((c) => c.label)).toEqual(['All fabrics', 'FAB-A'])
   })
 
   it('devices level: every switch is a tile; aggregate folds parallel cables per pair', () => {
     const g = singlePod()
-    const fabrics = buildFabrics(g, 'SITE-A')
+    const fabrics = buildFabrics(g, 'FAB-A')
     const agg = buildScene(g, fabrics, { kind: 'devices', fabricId: 'fabric' }, { aggregate: true })
     expect(agg.nodes.filter((n) => n.kind === 'device')).toHaveLength(5)
     expect(agg.edges).toHaveLength(6) // 2 spines × 3 leaves, one cable each → same count
     const raw = buildScene(g, fabrics, { kind: 'devices', fabricId: 'fabric' }, { aggregate: false })
     expect(raw.edges).toHaveLength(6)
     expect(raw.edges.every((e) => e.source.startsWith('spine'))).toBe(true) // spine on top
-    expect(agg.breadcrumb.map((c) => c.label)).toEqual(['All fabrics', 'SITE-A', 'Switches'])
+    expect(agg.breadcrumb.map((c) => c.label)).toEqual(['All fabrics', 'FAB-A', 'Switches'])
   })
 
   it('multi-pod: IPNs are external tiles at every level and link to fabrics / spines', () => {
@@ -171,7 +171,7 @@ describe('buildScene', () => {
     const g = singlePod()
     g.nodes.push(dev('ghost-1', 'leaf', { model_id: 'unknown' }))
     g.edges.push(link('link-x', 'spine-1', 'ghost-1'))
-    const fabrics = buildFabrics(g, 'SITE-A')
+    const fabrics = buildFabrics(g, 'FAB-A')
     expect(deviceStatus(g.nodes.at(-1)!, g)).toBe('minor')
     const top = buildScene(g, fabrics, { kind: 'fabrics' }, { aggregate: true })
     expect(top.nodes[0].status).toBe('minor')
@@ -191,7 +191,7 @@ describe('buildScene', () => {
 describe('navigation helpers', () => {
   it('drills fabric → fabric level → devices, and parentLevel walks back', () => {
     const g = singlePod()
-    const fabrics = buildFabrics(g, 'SITE-A')
+    const fabrics = buildFabrics(g, 'FAB-A')
     const top = buildScene(g, fabrics, { kind: 'fabrics' }, { aggregate: true })
     const l1 = drillInto(top.nodes[0], top.level)!
     expect(l1).toEqual({ kind: 'fabric', fabricId: 'fabric' })
@@ -209,7 +209,7 @@ describe('navigation helpers', () => {
 describe('layoutScene', () => {
   it('rows by tier, natural label order, rows centred on the widest', () => {
     const g = singlePod()
-    const scene = buildScene(g, buildFabrics(g, 'SITE-A'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true })
+    const scene = buildScene(g, buildFabrics(g, 'FAB-A'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true })
     const pos = layoutScene(scene.nodes, 'vertical')
     expect(pos.get('spine-1')!.y).toBe(0)
     expect(pos.get('leaf-1')!.y).toBe(TILE_H + TIER_GAP)
@@ -246,7 +246,7 @@ describe('layoutScene', () => {
 
   it('horizontal layout transposes axes', () => {
     const g = singlePod()
-    const scene = buildScene(g, buildFabrics(g, 'SITE-A'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true })
+    const scene = buildScene(g, buildFabrics(g, 'FAB-A'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true })
     const v = layoutScene(scene.nodes, 'vertical')
     const h = layoutScene(scene.nodes, 'horizontal')
     for (const id of v.keys()) {

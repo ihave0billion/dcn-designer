@@ -35,3 +35,8 @@ Deliverables/
 
 # Local-only agent/session guidance (keep off GitHub)
 AGENTS.md
+
+# Workspaces (customer projects + library) — never commit design data
+data/
+DCN-Designer/
+*.workspace/
