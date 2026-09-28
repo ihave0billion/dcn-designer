@@ -18,7 +18,7 @@ import type { CableLink } from '@/schemas/cable-links'
 import type { DesignResult } from '@domain'
 import { loadCableLinks, loadSwitchesFile } from '@/lib/library-io'
 import { buildDeviceBom } from '@/lib/device-bom'
-import { buildCableBom, cableKindLabel } from '@/lib/cable-bom'
+import { buildCableBom, cableKindLabel, cableMediaLabel } from '@/lib/cable-bom'
 import { findCandidate } from '@/lib/design-projection'
 import { endpointTotals } from '@/lib/endpoint-totals'
 import { SeverityBadge, StatusPill } from '@/components/design-status'
@@ -116,7 +116,7 @@ export function SummaryView({
   const ipnCount = committed?.total_ipn_routers ?? 0
 
   const deviceBom = buildDeviceBom(design, switches)
-  const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m })
+  const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m, default_media: requirements.default_cable_media })
   const rackCount = design.rack_layout.length
   const endpoints = endpointTotals(design)
 
@@ -228,8 +228,8 @@ export function SummaryView({
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Cables</CardTitle>
               <CardDescription>
-                {cableBom.costed_links} of {cableBom.total_links} links costed ·{' '}
-                {cableBom.total_ordered_m.toLocaleString()} m ordered
+                {cableBom.total_links} cables · {cableBom.costed_links} costed ·{' '}
+                {cableBom.total_ordered_m.toLocaleString()} m ordered · {cableMediaLabel(cableBom.default_media)} by default
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -252,10 +252,12 @@ export function SummaryView({
                     <TableBody>
                       {cableBom.rows.map((r, i) => (
                         <TableRow key={i}>
-                          <TableCell>{r.ordered_length_m} m</TableCell>
+                          <TableCell className={r.ordered_length_m == null ? 'text-amber-600 dark:text-amber-500 text-xs' : ''}>
+                            {r.ordered_length_m != null ? `${r.ordered_length_m} m` : 'not costed'}
+                          </TableCell>
                           <TableCell className="text-xs">{cableKindLabel(r.kind)}</TableCell>
                           <TableCell>{r.speed_g} G</TableCell>
-                          <TableCell className="uppercase text-xs">{r.media}</TableCell>
+                          <TableCell className="text-xs">{cableMediaLabel(r.media)}</TableCell>
                           <TableCell className="text-right">{r.count}</TableCell>
                         </TableRow>
                       ))}

@@ -34,6 +34,8 @@ import {
 import type { Switch } from '@/schemas/switches'
 import type { Server } from '@/schemas/servers'
 import { effectiveVpc, FABRIC_MODE_LABEL, PEER_LINK_MEMBERS_MAX, PEER_LINK_MEMBERS_MIN, type FabricMode } from '@/schemas/project'
+import type { CableLinkMedia } from '@/schemas/cable-links'
+import { CABLE_MEDIA_OPTIONS } from '@/lib/cable-bom'
 import { loadSwitchesFile, loadIpnRouters, type IpnRouterFileEntry,
   loadServersFile
 } from '@/lib/library-io'
@@ -939,9 +941,26 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
 
           <Section
             id="cable"
-            title="Cable tray"
-            description="Distance feeds the cable-length BOM (Phase 9)."
+            title="Cables"
+            description="Tray distance feeds the cable-length BOM; the default media applies to every cable without a per-link override (Links tab)."
           >
+            <Field label="Default cable media">
+              <Select
+                value={form.default_cable_media}
+                onValueChange={(v) => patch('default_cable_media', v as CableLinkMedia)}
+              >
+                <SelectTrigger className="max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CABLE_MEDIA_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
             <Field label="Cable tray length (m)">
               <Input
                 type="number"

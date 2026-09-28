@@ -1,4 +1,4 @@
-import { CableLinkKindSchema, type CableLink } from '@/schemas/cable-links'
+import { CableLinkKindSchema, type CableLink, CableLinkMediaSchema } from '@/schemas/cable-links'
 
 // Fixed-schema CSV round-trip for cable_links.yaml. The columns below
 // are what `Export CSV` writes and what `Import CSV` expects. Unknown
@@ -22,6 +22,7 @@ const COLUMNS = [
   'leaf_port',
   'speed_g',
   'optic_id',
+  'media',
   'patch_panel_id',
   'label',
   'length_m',
@@ -67,6 +68,7 @@ export function serializeCableLinksCsv(links: CableLink[]): string {
       l.device_b.port,
       l.speed_g,
       l.optic_id ?? '',
+      l.media ?? '',
       l.patch_panel_id ?? '',
       l.label,
       l.length_m ?? '',
@@ -201,6 +203,13 @@ export function parseCableLinksCsv(
     if (!idIn) serial += 1
     const length_m_raw = cell('length_m')
     const length_m = length_m_raw === '' ? null : Number(length_m_raw)
+    // v1.6.1 — optional media override; blank = project default.
+    const mediaRaw = cell('media').toLowerCase()
+    const mediaParsed = mediaRaw ? CableLinkMediaSchema.safeParse(mediaRaw) : null
+    if (mediaRaw && mediaParsed && !mediaParsed.success) {
+      result.warnings.push(`Row ${r + 1}: unknown media "${cell('media')}" — using the project default.`)
+    }
+    const media = mediaParsed && mediaParsed.success ? mediaParsed.data : null
 
     result.links.push({
       id,
@@ -217,6 +226,7 @@ export function parseCableLinksCsv(
       },
       speed_g,
       optic_id: cell('optic_id') || null,
+      media,
       patch_panel_id: cell('patch_panel_id') || null,
       label: cell('label') || `${spineDeviceId}:${spinePort} ↔ ${leafDeviceId}:${leafPort}`,
       length_m: length_m != null && Number.isFinite(length_m) ? length_m : null,

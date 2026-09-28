@@ -56,7 +56,7 @@ import {
 import { unpairedLeaves, validatePairs, type LeafPair } from '@/schemas/leaf-pairs'
 import { FABRIC_MODE_LABEL } from '@/schemas/project'
 import { seedCableLinks } from '@/lib/cable-links-seeder'
-import { cableKindLabel } from '@/lib/cable-bom'
+import { cableKindLabel, cableMediaLabel } from '@/lib/cable-bom'
 import type { BreakoutPair } from '@domain'
 import { useWorkspace } from '@/state/WorkspaceContext'
 import type { DesignResult } from '@domain'
@@ -507,6 +507,7 @@ export function LinksView({ requirements, projectPath, onGoToDesign }: LinksView
                           <TableHead>Leaf / leaf B</TableHead>
                           <TableHead className="w-16">Speed</TableHead>
                           <TableHead className="w-40">Optic</TableHead>
+                          <TableHead className="w-32">Media</TableHead>
                           <TableHead className="w-44">Patch panel</TableHead>
                           <TableHead className="w-16 text-right">Actions</TableHead>
                         </TableRow>
@@ -539,6 +540,10 @@ export function LinksView({ requirements, projectPath, onGoToDesign }: LinksView
                             </TableCell>
                             <TableCell>{l.speed_g}G</TableCell>
                             <TableCell className="font-mono">{l.optic_id ?? '—'}</TableCell>
+                            <TableCell>
+                              {cableMediaLabel(l.media ?? requirements.default_cable_media)}
+                              {l.media == null && <span className="text-muted-foreground"> (default)</span>}
+                            </TableCell>
                             <TableCell className="font-mono">
                               {l.patch_panel_id ?? '—'}
                             </TableCell>
@@ -594,6 +599,7 @@ export function LinksView({ requirements, projectPath, onGoToDesign }: LinksView
         onLoadOptics={loadOpticsFor}
         initialDraft={editing ?? undefined}
         editingLinkId={editing?.id ?? null}
+        defaultMedia={requirements.default_cable_media}
         onSubmit={handleSaveLink}
       />
 

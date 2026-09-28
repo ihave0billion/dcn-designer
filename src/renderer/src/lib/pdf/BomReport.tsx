@@ -31,7 +31,7 @@ export function BomReport({
   generatedAt
 }: BomReportInput): ReactElement<DocumentProps> {
   const deviceBom = buildDeviceBom(design, switches)
-  const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m })
+  const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m, default_media: requirements.default_cable_media })
   const projectName = requirements.project.name
   return (
     <Document

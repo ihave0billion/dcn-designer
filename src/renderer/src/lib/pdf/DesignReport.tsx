@@ -7,7 +7,7 @@ import { FABRIC_MODE_LABEL } from '@/schemas/project'
 import type { CableLink } from '@/schemas/cable-links'
 import type { Switch } from '@/schemas/switches'
 import type { TopologyGraph } from '@/lib/topology-extractor'
-import { buildCableBom, cableKindLabel, unresolvedLabel, type CableBom } from '@/lib/cable-bom'
+import { buildCableBom, cableKindLabel, cableMediaLabel, unresolvedLabel, type CableBom } from '@/lib/cable-bom'
 import type { ServerInfoResolver } from '@/lib/server-symbols'
 import { buildDeviceBom, type DeviceBom } from '@/lib/device-bom'
 import { findCandidate } from '@/lib/design-projection'
@@ -66,11 +66,6 @@ const SCENARIO_NOTE: Record<OpticsBomScenario, string> = {
   S3: 'Breakout: one spine port fans out to several leaf ports. Needs the matched spine/leaf PIDs below, and usually a patch panel at the break.'
 }
 
-const MEDIA_LABEL: Record<string, string> = {
-  dac: 'DAC (copper)',
-  aoc: 'AOC',
-  fiber: 'Fiber'
-}
 
 function fmt(n: number | null | undefined, unit = ''): string {
   if (n == null) return '—'
@@ -519,29 +514,33 @@ export function BomPage({
             <View style={styles.trHead}>
               <Text style={[styles.th, { flex: 1.2 }, styles.right]}>Length</Text>
               <Text style={[styles.th, { flex: 1.6 }]}>Kind</Text>
-              <Text style={[styles.th, { flex: 1.2 }]}>Media</Text>
+              <Text style={[styles.th, { flex: 2 }]}>Media</Text>
               <Text style={[styles.th, { flex: 1 }, styles.right]}>Speed</Text>
-              <Text style={[styles.th, { flex: 2.4 }]}>Optic</Text>
+              <Text style={[styles.th, { flex: 1.6 }]}>Optic</Text>
               <Text style={[styles.th, { flex: 1 }, styles.right]}>Qty</Text>
               <Text style={[styles.th, { flex: 1.4 }, styles.right]}>Total m</Text>
             </View>
             {cableBom.rows.map((r) => (
-              <View style={styles.tr} key={`${r.ordered_length_m}-${r.kind}-${r.speed_g}-${r.optic_id ?? ''}`}>
-                <Text style={[styles.td, { flex: 1.2 }, styles.right]}>{r.ordered_length_m} m</Text>
+              <View style={styles.tr} key={`${r.ordered_length_m ?? 'x'}-${r.kind}-${r.speed_g}-${r.media}-${r.optic_id ?? ''}`}>
+                <Text style={[styles.td, { flex: 1.2 }, styles.right, r.ordered_length_m == null ? { color: COLORS.warn } : {}]}>
+                  {r.ordered_length_m != null ? `${r.ordered_length_m} m` : 'not costed'}
+                </Text>
                 <Text style={[styles.td, { flex: 1.6 }]}>{cableKindLabel(r.kind)}</Text>
-                <Text style={[styles.td, { flex: 1.2 }]}>{MEDIA_LABEL[r.media] ?? r.media}</Text>
+                <Text style={[styles.td, { flex: 2 }]}>{cableMediaLabel(r.media)}</Text>
                 <Text style={[styles.td, { flex: 1 }, styles.right]}>{fmt(r.speed_g)}G</Text>
-                <Text style={[styles.td, { flex: 2.4 }]}>{t(r.optic_id)}</Text>
+                <Text style={[styles.td, { flex: 1.6 }]}>{t(r.optic_id)}</Text>
                 <Text style={[styles.td, { flex: 1 }, styles.right]}>{fmt(r.count)}</Text>
                 <Text style={[styles.td, { flex: 1.4 }, styles.right]}>
-                  {fmt(r.total_ordered_m)}
+                  {r.ordered_length_m != null ? fmt(r.total_ordered_m) : '—'}
                 </Text>
               </View>
             ))}
             <View style={styles.trTotal}>
-              <Text style={[styles.tdBold, { flex: 7.4 }]}>Total</Text>
+              <Text style={[styles.tdBold, { flex: 7.4 }]}>
+                Total ({fmt(cableBom.costed_links)} of {fmt(cableBom.total_links)} costed)
+              </Text>
               <Text style={[styles.tdBold, { flex: 1 }, styles.right]}>
-                {fmt(cableBom.costed_links)}
+                {fmt(cableBom.total_links)}
               </Text>
               <Text style={[styles.tdBold, { flex: 1.4 }, styles.right]}>
                 {fmt(cableBom.total_ordered_m)}
@@ -550,8 +549,9 @@ export function BomPage({
           </View>
         )}
         <Text style={styles.note}>
+          Media: {cableMediaLabel(cableBom.default_media)} unless a link says otherwise (Requirements / Cables / Default cable media, or per link on the Links tab).{' '}
           {cableTrayM != null
-            ? `Derived from a ${fmt(cableTrayM)} m cable tray run plus 3 m of rise at each end, rounded up to the next standard cable size. Same-rack links are costed at 3 m.`
+            ? `Lengths derived from a ${fmt(cableTrayM)} m cable tray run plus 3 m of rise at each end, rounded up to the next standard cable size. Same-rack links are costed at 3 m.`
             : 'Same-rack links are costed at 3 m. Set Cable Tray (m) in Requirements to cost cross-rack runs.'}
           {cableBom.user_specified_links > 0
             ? ` ${cableBom.user_specified_links} link(s) use a length entered by hand instead.`
@@ -1028,7 +1028,7 @@ export function DesignReport({
   generatedAt
 }: DesignReportInput): ReactElement<DocumentProps> {
   const deviceBom = buildDeviceBom(design, switches)
-  const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m })
+  const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m, default_media: requirements.default_cable_media })
   const projectName = requirements.project.name
   const ruById = new Map(switches.map((s) => [s.id, s.ru]))
   const topoPages = buildPdfScenePages(topology, projectName, topologyLayout ?? null, {

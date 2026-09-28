@@ -204,6 +204,7 @@ export const REQUIREMENTS: RequirementsFile = {
   racks: [],
   racks_per_row: null,
   cable_tray_m: 10,
+  default_cable_media: 'mmf',
   target_oversub_informational: 3
 }
 

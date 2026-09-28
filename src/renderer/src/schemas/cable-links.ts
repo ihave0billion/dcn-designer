@@ -24,9 +24,15 @@ export type CableEndpoint = z.infer<typeof CableEndpointSchema>
 export const CableLinkKindSchema = z.enum(['uplink', 'vpc-peer-link', 'server'])
 export type CableLinkKind = z.infer<typeof CableLinkKindSchema>
 
+// v1.6.1 — cable media. Null/absent = the project default
+// (requirements.default_cable_media, MMF unless changed).
+export const CableLinkMediaSchema = z.enum(['mmf', 'smf', 'dac', 'aoc'])
+export type CableLinkMedia = z.infer<typeof CableLinkMediaSchema>
+
 export const CableLinkSchema = z.object({
   id: z.string().min(1),
   kind: CableLinkKindSchema.default('uplink'),
+  media: CableLinkMediaSchema.nullable().optional(),
   device_a: CableEndpointSchema,
   device_b: CableEndpointSchema,
   speed_g: z.number().positive(),

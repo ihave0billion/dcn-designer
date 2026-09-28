@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildCableBom,
   deriveLinkLength,
-  mediaForLength,
+  cableMediaLabel,
   roundUpToStandardLength,
   unresolvedLabel,
   INTRA_RACK_RUN_M,
@@ -53,15 +53,6 @@ describe('roundUpToStandardLength', () => {
 
   it('returns null past the longest standard cable', () => {
     expect(roundUpToStandardLength(101)).toBeNull()
-  })
-})
-
-describe('mediaForLength', () => {
-  it('bands DAC / AOC / fiber', () => {
-    expect(mediaForLength(3)).toBe('dac')
-    expect(mediaForLength(5)).toBe('aoc')
-    expect(mediaForLength(30)).toBe('aoc')
-    expect(mediaForLength(50)).toBe('fiber')
   })
 })
 
@@ -133,14 +124,14 @@ describe('buildCableBom', () => {
     expect(bom.rows[0]).toMatchObject({
       ordered_length_m: 20,
       count: 3,
-      media: 'aoc',
+      media: 'mmf',
       total_raw_m: 48,
       total_ordered_m: 60
     })
     expect(bom.rows[1]).toMatchObject({
       ordered_length_m: 3,
       count: 2,
-      media: 'dac',
+      media: 'mmf',
       total_ordered_m: 6
     })
     expect(bom.total_links).toBe(5)
@@ -180,6 +171,9 @@ describe('buildCableBom', () => {
     })
     expect(bom.total_links).toBe(3)
     expect(bom.costed_links).toBe(1)
+    // The two uncosted links still get a row (length unknown) — the BOM
+    // must account for every cable even before a tray distance is entered.
+    expect(bom.rows.map((r) => [r.ordered_length_m, r.count])).toEqual([[null, 2], [3, 1]])
     expect(bom.unresolved).toEqual([
       { reason: 'no_cable_tray_distance', count: 2, max_raw_m: null }
     ])
@@ -191,7 +185,7 @@ describe('buildCableBom', () => {
       cable_tray_m: 120,
       links: [crossRack({ id: 'l1' }), crossRack({ id: 'l2' })]
     })
-    expect(bom.rows).toEqual([])
+    expect(bom.rows.map((r) => [r.ordered_length_m, r.count, r.total_ordered_m])).toEqual([[null, 2, 0]])
     expect(bom.unresolved).toEqual([
       { reason: 'exceeds_longest_standard_cable', count: 2, max_raw_m: 126 }
     ])
@@ -216,5 +210,50 @@ describe('buildCableBom', () => {
       costed_links: 0,
       total_ordered_m: 0
     })
+  })
+})
+
+describe('buildCableBom — media (v1.6.1)', () => {
+  it('applies multimode fiber by default, regardless of length', () => {
+    const bom = buildCableBom({ cable_tray_m: 10, links: [link({ id: 'l1' }), crossRack({ id: 'l2' })] })
+    expect(bom.default_media).toBe('mmf')
+    expect(bom.rows.map((r) => r.media)).toEqual(['mmf', 'mmf'])
+  })
+
+  it('uses the project default media and lets a link override it', () => {
+    const bom = buildCableBom({
+      cable_tray_m: 10,
+      default_media: 'smf',
+      links: [link({ id: 'l1' }), link({ id: 'l2', media: 'dac' }), link({ id: 'l3' })]
+    })
+    expect(bom.rows).toHaveLength(2)
+    expect(bom.rows.find((r) => r.media === 'smf')?.count).toBe(2)
+    expect(bom.rows.find((r) => r.media === 'dac')?.count).toBe(1)
+  })
+
+  it('still lists every cable when none can be costed', () => {
+    const bom = buildCableBom({
+      cable_tray_m: null,
+      links: [
+        crossRack({ id: 'l1' }),
+        crossRack({ id: 'l2' }),
+        crossRack({ id: 'l3', kind: 'vpc-peer-link' })
+      ]
+    })
+    expect(bom.total_links).toBe(3)
+    expect(bom.costed_links).toBe(0)
+    expect(bom.rows.map((r) => [r.kind, r.count, r.ordered_length_m])).toEqual([
+      ['uplink', 2, null],
+      ['vpc-peer-link', 1, null]
+    ])
+    expect(bom.rows.reduce((a, r) => a + r.count, 0)).toBe(3)
+    expect(bom.total_ordered_m).toBe(0)
+  })
+
+  it('labels every media value', () => {
+    expect(cableMediaLabel('mmf')).toBe('MMF fiber (OM4)')
+    expect(cableMediaLabel('smf')).toBe('SMF fiber (OS2)')
+    expect(cableMediaLabel('dac')).toBe('DAC (copper)')
+    expect(cableMediaLabel('aoc')).toBe('AOC')
   })
 })

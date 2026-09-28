@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { CABLE_MEDIA_OPTIONS, cableMediaLabel } from '@/lib/cable-bom'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -18,7 +19,7 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import type { Switch } from '@/schemas/switches'
-import type { CableLink } from '@/schemas/cable-links'
+import type { CableLink, CableLinkMedia } from '@/schemas/cable-links'
 import type { Optic } from '@/schemas/optics'
 import type { PatchPanel } from '@/schemas/patch-panels'
 import { expandPortTemplate } from '@/lib/port-template'
@@ -33,6 +34,8 @@ export interface FabricDevice {
 }
 
 interface NewLinkDialogProps {
+  /** v1.6.1 — the project default media, shown on the 'Project default' choice. */
+  defaultMedia: CableLinkMedia
   open: boolean
   onOpenChange(open: boolean): void
   spines: FabricDevice[]
@@ -97,6 +100,7 @@ export function NewLinkDialog({
   onLoadOptics,
   initialDraft,
   editingLinkId,
+  defaultMedia,
   onSubmit
 }: NewLinkDialogProps) {
   const isEdit = Boolean(editingLinkId)
@@ -111,6 +115,8 @@ export function NewLinkDialog({
   const [lengthM, setLengthM] = useState<string>(
     initialDraft?.length_m != null ? String(initialDraft.length_m) : ''
   )
+  // v1.6.1 — '' = follow the project default media.
+  const [media, setMedia] = useState<string>(initialDraft?.media ?? '')
   const [leafSidePortChoice, setLeafSidePortChoice] = useState<'primary' | 'secondary'>('primary')
   const [error, setError] = useState<string | null>(null)
   const [spineOpticsLoaded, setSpineOpticsLoaded] = useState<Optic[]>(spineOptics)
@@ -128,6 +134,7 @@ export function NewLinkDialog({
     setPatchPanelId(initialDraft?.patch_panel_id ?? '')
     setLabel(initialDraft?.label ?? '')
     setLengthM(initialDraft?.length_m != null ? String(initialDraft.length_m) : '')
+    setMedia(initialDraft?.media ?? '')
     setLeafSidePortChoice('primary')
     setError(null)
     setSpineOpticsLoaded(spineOptics)
@@ -278,6 +285,7 @@ export function NewLinkDialog({
       patch_panel_id: patchPanelId || null,
       label: label || `${spineDeviceId}:${spinePort} ↔ ${leafDeviceId}:${leafPort}`,
       length_m: length_m_n != null && Number.isFinite(length_m_n) ? length_m_n : null,
+      media: media && media !== '__default__' ? (media as CableLinkMedia) : null,
       notes: initialDraft?.notes ?? null
     }
     void Promise.resolve(onSubmit(link)).then(() => onOpenChange(false))
@@ -440,6 +448,21 @@ export function NewLinkDialog({
                       {p.vendor !== '(placeholder)' && (
                         <span className="text-muted-foreground"> · {p.vendor}</span>
                       )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Media">
+              <Select value={media || '__default__'} onValueChange={(v) => setMedia(v === '__default__' ? '' : v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">Project default · {cableMediaLabel(defaultMedia)}</SelectItem>
+                  {CABLE_MEDIA_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -351,7 +351,7 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
   }
 
   const deviceBom = buildDeviceBom(design, switches)
-  const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m })
+  const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m, default_media: requirements.default_cable_media })
 
   return (
     <div className="p-6 space-y-4 overflow-auto h-full">

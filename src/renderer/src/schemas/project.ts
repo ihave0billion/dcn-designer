@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CableLinkMediaSchema } from './cable-links'
 
 // ────────────────────────────────────────────────────────────────────
 // Project metadata
@@ -170,6 +171,9 @@ export const RequirementsFileSchema = z.object({
   // Rack view and the PDF. null = no row structure.
   racks_per_row: z.number().int().positive().nullable().default(null),
   cable_tray_m: z.number().nonnegative().nullable().default(null),
+  // v1.6.1 — media for every cable that carries no per-link override.
+  // Multimode fiber by default (user decision 2026-09-28: never DAC).
+  default_cable_media: CableLinkMediaSchema.default('mmf'),
   target_oversub_informational: z.number().positive().nullable().default(null)
 })
 export type RequirementsFile = z.infer<typeof RequirementsFileSchema>
@@ -210,6 +214,7 @@ export function emptyRequirements(project: ProjectMeta): RequirementsFile {
     racks: [],
     racks_per_row: null,
     cable_tray_m: null,
+    default_cable_media: 'mmf',
     target_oversub_informational: null
   }
 }
