@@ -1,4 +1,4 @@
-# Phase 17 — Nexus Dashboard cluster (v1.7.0, 2026-09-28)
+# Phase 17 — Nexus Dashboard cluster (BUILT — v1.7.0, 2026-09-28)
 
 User request (2026-09-28, verbatim intent): *"add a place in the Requirements tab
 to add ND-CLUSTER-G5S or ND-CLUSTER-G5L to a design, and show that ND cluster in

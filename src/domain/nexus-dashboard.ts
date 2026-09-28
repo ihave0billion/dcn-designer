@@ -52,7 +52,8 @@ export const ND_DEFAULT_DATA_SPEED_G = 25
 export const ND_DEFAULT_MGMT_SPEED_G = 10
 /** Reserved device id of the OOB-management cloud endpoint (no OOB tier in the design). */
 export const OOB_MGMT_DEVICE_ID = 'oob-mgmt'
-export const OOB_MGMT_LABEL = 'OOB management network'
+/** Short enough for the topology tile's label pill (16 chars). */
+export const OOB_MGMT_LABEL = 'OOB mgmt network'
 /** Port name used on the cloud end of a management cable. */
 export const OOB_MGMT_PORT = 'OOB'
 

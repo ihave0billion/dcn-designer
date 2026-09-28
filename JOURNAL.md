@@ -24,6 +24,19 @@ next time we hit a similar shape of problem.
 
 ## Open items / deferred decisions
 
+### 2026-09-28 — Phase 17: what "OOB switches" means, and the G5L RU
+
+- The app had no OOB / management-switch concept; Phase 17 introduced a per-tier
+  `oob_management` flag (Requirements → Tiers → "OOB mgmt"). Whether the SITE-B 1G
+  9348GC-FX3 tier IS the OOB network (so the ND mgmt0/1 cables land there) is the
+  user's call — left unticked, so the topology draws the OOB cloud.
+- ND-CLUSTER-G5S vs G5L for SITE-B was not stated; G5S is set in production as the
+  default. Flip it on the Requirements card and regenerate.
+- ND-NODE-G5L RU = 2 comes from the NetBox device-type library (Cisco's hardware
+  guide gives no figure); G5S = 1RU (C225 M8). Fix `ND_CLUSTERS` if wrong.
+- ND node power is a 600 W estimate (dual 1200 W PSUs, no typical figure); the BOM
+  flags it †.
+
 ### 2026-09-26 — Phase 13: Visio export + PDF topology on one scene
 
 **Real-Visio check pending.** The `.vsdx` writer is a TypeScript port of the
