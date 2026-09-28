@@ -754,3 +754,22 @@ auto-memory as `feedback_interview_one_question_at_a_time.md`). Each question sh
 
 Batching 4 questions into a table — even with options — is wrong. Wait for each answer before
 asking the next; later answers may change earlier ones.
+
+### 2026-09-28 — Never revoke a blob: URL right after the download click
+`URL.createObjectURL(blob)` → `<a download>` click → `URL.revokeObjectURL(url)` in the
+same tick works in plain Chrome only because Chrome snapshots the blob at click time.
+A download manager extension (the user runs Chrono) registers the download and fetches
+the URL itself a moment later — by then it is revoked and the transfer sits at
+"X MB of X MB, 0 B/s" forever, source `about:blank`. Two lessons: (1) if a blob URL must
+be used, revoke it minutes later, not immediately; (2) when a server is already in the
+loop, do not use a blob at all — stage the bytes and serve a real same-origin URL with
+`Content-Disposition: attachment` (v1.5.3, `src/server/downloads.ts`). That is what every
+download path (browser, extension, right-click save) knows how to finish.
+
+### 2026-09-28 — `src/server` runs under Node's type-stripping loader: no TS-only syntax
+`tsc` (typecheck:server) accepted `constructor(private readonly dir: string) {}` in
+`downloads.ts`; the container crashed at boot with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`
+because `node src/server/index.ts` strips types and refuses parameter properties, enums
+and namespaces. Declare fields explicitly in anything under `src/server`, and always boot
+the server locally (`PORT=8790 node src/server/index.ts`) before deploying — the
+typecheck cannot catch this class of error.

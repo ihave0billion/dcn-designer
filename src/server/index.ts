@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import AdmZip from 'adm-zip'
 import { handlers } from './dcn-handlers.ts'
 import { WORKSPACE_ROOT, UPLOAD_DIR, resolveInRoot } from './paths.ts'
+import { DownloadStage, downloadMime } from './downloads.ts'
 import {
   SESSION_COOKIE,
   SessionStore,
@@ -29,6 +30,7 @@ const sessions = new SessionStore({
   absoluteMs: SESSION_MAX_HOURS * 3_600_000
 })
 const MAX_UPLOAD_BYTES = Number(process.env.DCN_MAX_UPLOAD_BYTES || 64 * 1024 * 1024)
+const downloads = new DownloadStage(join(UPLOAD_DIR, 'downloads'))
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -250,6 +252,37 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     const bytes = await fs.readFile(abs)
     res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.byteLength })
     res.end(bytes)
+    return
+  }
+
+  // v1.5.3 — browser "Save a copy…": stage the rendered bytes, then serve them
+  // from a real URL with Content-Disposition so download managers can finish
+  // (a blob: URL revoked after the click left Chrono stuck at 100 %).
+  if (url.pathname === '/api/upload/download' && req.method === 'PUT') {
+    const staged = await downloads.stage(
+      await readBody(req),
+      url.searchParams.get('name') || 'download.bin'
+    )
+    sendJson(res, 200, staged)
+    return
+  }
+
+  const dl = /^\/api\/download\/([^/]+)\/([^/]+)$/.exec(url.pathname)
+  if (dl && req.method === 'GET') {
+    const abs = downloads.resolve(dl[1], decodeURIComponent(dl[2]))
+    if (!abs) {
+      sendJson(res, 404, { error: 'Download expired or unknown' })
+      return
+    }
+    const name = basename(abs)
+    const { size } = await fs.stat(abs)
+    res.writeHead(200, {
+      'content-type': downloadMime(name),
+      'content-length': size,
+      'content-disposition': `attachment; filename="${name.replace(/"/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+      'cache-control': 'private, no-store'
+    })
+    createReadStream(abs).pipe(res)
     return
   }
 

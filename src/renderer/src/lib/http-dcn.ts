@@ -93,19 +93,47 @@ async function upload(endpoint: string, file: File): Promise<{ path: string; bas
   return { path: payload.path, basename: payload.basename ?? file.name }
 }
 
-function downloadBlob(filename: string, blob: Blob): void {
-  const url = URL.createObjectURL(blob)
+function clickDownload(href: string, filename: string): void {
   const a = document.createElement('a')
-  a.href = url
+  a.href = href
   a.download = filename
   document.body.appendChild(a)
   a.click()
   a.remove()
-  URL.revokeObjectURL(url)
 }
 
-function downloadText(filename: string, text: string): void {
-  downloadBlob(filename, new Blob([text], { type: 'text/csv;charset=utf-8' }))
+/**
+ * Hand the browser a file to save. The bytes are staged on the server and the
+ * click goes to a real same-origin URL (`/api/download/<token>/<name>`, served
+ * with Content-Disposition: attachment). The earlier blob: URL, revoked right
+ * after the click, stalled download managers such as Chrono at "100 %, 0 B/s":
+ * they fetch the URL on their own schedule, after it was gone. If staging
+ * itself fails, fall back to the blob but keep it alive for a while.
+ */
+async function downloadBytes(filename: string, bytes: Uint8Array, type: string): Promise<void> {
+  try {
+    const res = await fetch(`/api/upload/download?name=${encodeURIComponent(filename)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: bytes as BodyInit
+    })
+    if (res.status === 401) sessionEnded(res)
+    const staged = (await res.json()) as { token?: string; name?: string; error?: string }
+    if (!res.ok || !staged.token || !staged.name) {
+      throw new Error(staged.error || `Download staging failed (${res.status})`)
+    }
+    clickDownload(`/api/download/${staged.token}/${encodeURIComponent(staged.name)}`, staged.name)
+  } catch (e) {
+    console.warn('[dcn] server download failed, falling back to a blob URL', e)
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }))
+    clickDownload(url, filename)
+    // Revoke late: the browser (or an extension) may still be reading it.
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000)
+  }
+}
+
+function downloadText(filename: string, text: string): Promise<void> {
+  return downloadBytes(filename, new TextEncoder().encode(text), 'text/csv;charset=utf-8')
 }
 
 const httpDcn: DcnApi = {
@@ -149,7 +177,7 @@ const httpDcn: DcnApi = {
 
   writeTextFile: async (filePath, text) => {
     if (filePath.startsWith(DOWNLOAD_PREFIX)) {
-      downloadText(filePath.slice(DOWNLOAD_PREFIX.length), text)
+      await downloadText(filePath.slice(DOWNLOAD_PREFIX.length), text)
       return
     }
     await call<void>('write-text-file', filePath, text)
@@ -161,7 +189,7 @@ const httpDcn: DcnApi = {
     if (filePath.startsWith(DOWNLOAD_PREFIX)) {
       const name = filePath.slice(DOWNLOAD_PREFIX.length)
       const type = name.endsWith('.vsdx') ? 'application/vnd.ms-visio.drawing' : 'application/pdf'
-      downloadBlob(name, new Blob([data as BlobPart], { type }))
+      await downloadBytes(name, data, type)
       return
     }
     // Real workspace path — the server owns it, so PUT the bytes there.
