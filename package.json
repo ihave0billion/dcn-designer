@@ -1,6 +1,6 @@
 {
   "name": "dcn-designer",
-  "version": "1.6.3",
+  "version": "1.7.0",
   "description": "Cisco Data Center spine-leaf design tool (GUI successor to v8 spreadsheet)",
   "main": "./out/main/index.js",
   "private": true,
