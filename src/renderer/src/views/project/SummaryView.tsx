@@ -20,6 +20,7 @@ import { loadCableLinks, loadSwitchesFile } from '@/lib/library-io'
 import { buildDeviceBom } from '@/lib/device-bom'
 import { buildCableBom, cableKindLabel } from '@/lib/cable-bom'
 import { findCandidate } from '@/lib/design-projection'
+import { endpointTotals } from '@/lib/endpoint-totals'
 import { SeverityBadge, StatusPill } from '@/components/design-status'
 
 // Phase 10 — the Summary tab. One screen that answers "what is this design
@@ -117,6 +118,7 @@ export function SummaryView({
   const deviceBom = buildDeviceBom(design, switches)
   const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m })
   const rackCount = design.rack_layout.length
+  const endpoints = endpointTotals(design)
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -144,14 +146,24 @@ export function SummaryView({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
               <Stat k="Spines" v={String(summary.total_spines)} />
               <Stat k="Leaves" v={String(summary.total_leaves)} />
+              <Stat
+                k="Endpoints supported"
+                v={endpoints.supported.toLocaleString()}
+                sub={
+                  endpoints.requested > 0
+                    ? `${endpoints.requested.toLocaleString()} requested · ${endpoints.spare.toLocaleString()} spare`
+                    : undefined
+                }
+              />
               <Stat k="Pods" v={String(podCount)} />
               <Stat k="IPN routers" v={ipnCount > 0 ? String(ipnCount) : '—'} />
               <Stat k="Racks" v={String(rackCount)} />
               <Stat k="Cable links" v={String(cableBom.total_links)} />
               <Stat k="Host bandwidth" v={`${summary.total_host_bw_g.toLocaleString()} G`} />
+              <Stat k="Uplink bandwidth" v={`${summary.total_uplink_bw_g.toLocaleString()} G`} />
               <Stat k="Oversubscription" v={summary.computed_oversub_label} />
             </div>
           </CardContent>
@@ -344,11 +356,12 @@ export function SummaryView({
   )
 }
 
-function Stat({ k, v }: { k: string; v: string }) {
+function Stat({ k, v, sub }: { k: string; v: string; sub?: string }) {
   return (
     <div>
       <div className="text-xs text-muted-foreground">{k}</div>
       <div className="font-medium tabular-nums">{v}</div>
+      {sub && <div className="text-xs text-muted-foreground tabular-nums">{sub}</div>}
     </div>
   )
 }

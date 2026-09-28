@@ -11,6 +11,7 @@ import { buildCableBom, cableKindLabel, unresolvedLabel, type CableBom } from '@
 import type { ServerInfoResolver } from '@/lib/server-symbols'
 import { buildDeviceBom, type DeviceBom } from '@/lib/device-bom'
 import { findCandidate } from '@/lib/design-projection'
+import { endpointTotals } from '@/lib/endpoint-totals'
 import type { TopologyLayoutFile } from '@/schemas/topology-layout'
 import { buildPdfScenePages, type PdfScenePage } from './topology-scene'
 import { bundleGeometry, bundlePath } from '@/lib/port-channel-symbol'
@@ -238,6 +239,7 @@ function DesignSummaryPage({
   const s = design.summary
   const committed = findCandidate(design, design.committed_candidate_id)
   const mp = committed?.multipod ?? null
+  const endpoints = endpointTotals(design)
 
   return (
     <Page size="LETTER" style={styles.page}>
@@ -253,6 +255,14 @@ function DesignSummaryPage({
         <Def label="Oversubscription" value={s.computed_oversub_label} />
         <Def label="Total spines" value={fmt(s.total_spines)} />
         <Def label="Total leaves" value={fmt(s.total_leaves)} />
+        <Def
+          label="Endpoints supported"
+          value={
+            endpoints.requested > 0
+              ? `${fmt(endpoints.supported)} (${fmt(endpoints.requested)} requested)`
+              : fmt(endpoints.supported)
+          }
+        />
         <Def label="IPN routers" value={fmt(committed?.total_ipn_routers ?? 0)} />
         <Def label="Host bandwidth" value={`${fmt(s.total_host_bw_g)} G`} />
         <Def label="Uplink bandwidth" value={`${fmt(s.total_uplink_bw_g)} G`} />
