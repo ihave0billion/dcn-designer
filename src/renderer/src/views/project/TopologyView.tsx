@@ -26,6 +26,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Cloud,
   Globe,
   Info,
   Loader2,
@@ -136,6 +137,8 @@ const PEER_LINK_GAP = 5
 
 /** The skill's peer-link red, shared with the PDF and Visio exports. */
 const PEER_LINK_COLOR = '#B85450'
+// Phase 17 — Nexus Dashboard cluster bracket (teal, the ND data-link accent).
+const ND_COLOR = '#2BB5C4'
 const BRACKET_PAD = 5
 
 const FIT = { padding: 0.12, duration: 300, maxZoom: 1.25 }
@@ -783,6 +786,7 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
   const drillable = n.kind === 'fabric' || n.kind === 'group'
   const smart = !!n.device?.smart
   const server = n.kind === 'server'
+  const cloud = n.kind === 'cloud'
   // In the vertical layout spines/IPNs fan their links downward, straight
   // through a label placed under the tile — so their label sits on top.
   const vertical = sourcePosition === Position.Bottom || sourcePosition === undefined
@@ -796,7 +800,7 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
       )}
     >
       {n.label}
-      {server && n.sublabel && (
+      {(server || cloud) && n.sublabel && (
         <span className="block text-[9px] font-normal opacity-80 tracking-normal">{n.sublabel}</span>
       )}
     </div>
@@ -809,7 +813,7 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
         data.dimmed && 'opacity-25'
       )}
       style={{ width: TILE_W, height: TILE_H }}
-      title={drillable ? 'Double-click to open · drag to move' : server ? 'Server symbol (per leaf or per vPC pair) · drag to move' : 'Drag to move'}
+      title={drillable ? 'Double-click to open · drag to move' : server ? 'Server symbol (per leaf or per vPC pair) · drag to move' : cloud ? 'OOB management network outside this design · drag to move' : 'Drag to move'}
     >
       {labelAbove && label}
       <div className="relative">
@@ -824,7 +828,8 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
             'relative size-14 chamfer-xs border bg-tile border-tile-border flex items-center justify-center',
             selected && 'border-hot shadow-[0_0_0_2px_var(--color-hot)]',
             n.kind === 'device' && n.device?.model_id === 'unknown' && 'border-dashed',
-            server && 'border-tile-border/60 bg-tile/60'
+            server && 'border-tile-border/60 bg-tile/60',
+            cloud && 'border-dashed border-tile-border/70 bg-tile/40 rounded-full'
           )}
         >
           <Handle
@@ -873,6 +878,8 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
 function TileIcon({ kind, role }: { kind: SceneNode['kind']; role: SceneNode['role'] }) {
   if (kind === 'fabric') return <Globe className="size-full" strokeWidth={1.6} />
   if (kind === 'server') return <ServerIcon className="size-full" strokeWidth={1.6} />
+  if (kind === 'cloud' || role === 'oob') return <Cloud className="size-full" strokeWidth={1.6} />
+  if (role === 'nd') return <NdGlyph />
   if (kind === 'ipn' || role === 'ipn') return <RouterGlyph />
   if (role === 'spine') return <SpineGlyph />
   return <LeafGlyph />
@@ -880,19 +887,34 @@ function TileIcon({ kind, role }: { kind: SceneNode['kind']; role: SceneNode['ro
 
 // Phase 14 — dashed bracket behind a vPC pair that has no peer-link.
 function BracketRenderer({ data }: NodeProps<BracketNode>) {
+  // Phase 17 — the Nexus Dashboard cluster bracket is teal and labelled with the cluster PID.
+  const color = data.pair.kind === 'nd' ? ND_COLOR : PEER_LINK_COLOR
   return (
     <div
       className="relative pointer-events-none"
-      style={{ width: data.w, height: data.h, border: `1.5px dashed ${PEER_LINK_COLOR}`, opacity: 0.8 }}
+      style={{ width: data.w, height: data.h, border: `1.5px dashed ${color}`, opacity: 0.8 }}
       aria-hidden="true"
     >
       <span
         className="absolute -top-2.5 left-2 px-1 text-[9px] font-bold uppercase tracking-[0.18em] bg-background"
-        style={{ color: PEER_LINK_COLOR }}
+        style={{ color }}
       >
         {data.pair.label}
       </span>
     </div>
+  )
+}
+
+// Phase 17 — Nexus Dashboard node: a dashboard of four tiles with a gauge needle.
+function NdGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-full" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7.5" height="7.5" />
+      <rect x="13.5" y="3" width="7.5" height="7.5" />
+      <rect x="3" y="13.5" width="7.5" height="7.5" />
+      <rect x="13.5" y="13.5" width="7.5" height="7.5" />
+      <path d="M15.5 19l3-3" strokeWidth="1.5" />
+    </svg>
   )
 }
 
@@ -980,7 +1002,7 @@ function FanEdgeRenderer({
     if (index === 0) ring = g
     lx = g.mid.x
     ly = g.mid.y
-  } else if (kind === 'server') {
+  } else if (kind === 'server' || kind === 'nd-data' || kind === 'nd-mgmt') {
     // Phase 15 — one straight line per NIC, landing on its own spot along the
     // server tile's edge so a dual-attached symbol reads as a clear V (both
     // curves used to land on the same handle and looked like one line at
@@ -1005,14 +1027,15 @@ function FanEdgeRenderer({
     lx = mx
     ly = (sourceY + targetY) / 2 + off * 0.75
   }
-  const width = kind === 'server' ? 1 : kind === 'vpc-peer-link' ? 2 : Math.min(1.5 + (count - 1) * 0.35, 6)
+  const width = kind === 'server' || kind === 'nd-mgmt' ? 1 : kind === 'nd-data' ? 1.5 : kind === 'vpc-peer-link' ? 2 : Math.min(1.5 + (count - 1) * 0.35, 6)
   // Peer-links never carry a label box (decision: the oval says it all).
   const showLabel = kind !== 'vpc-peer-link' && (selected || (data?.showLabel ?? false))
+  // Phase 17 — ND data links share the fabric-link colour; management links are dashed and muted.
   const stroke = selected
     ? 'var(--hot)'
     : kind === 'vpc-peer-link'
       ? PEER_LINK_COLOR
-      : kind === 'server'
+      : kind === 'server' || kind === 'nd-mgmt'
         ? 'var(--muted-foreground)'
         : 'var(--link)'
   const labelTransform = `translate(-50%, -50%) translate(${lx}px, ${ly}px)`
@@ -1025,7 +1048,8 @@ function FanEdgeRenderer({
         style={{
           strokeWidth: selected ? width + 1 : width,
           stroke,
-          opacity: selected ? 1 : kind === 'server' ? 0.6 : 0.85
+          strokeDasharray: kind === 'nd-mgmt' ? '5 4' : undefined,
+          opacity: selected ? 1 : kind === 'server' || kind === 'nd-mgmt' ? 0.6 : 0.85
         }}
       />
       {ring && (
@@ -1304,8 +1328,22 @@ function NodeDetails({
             </span>
           }
         />
-        <KV label="Role" value={dev.role.toUpperCase()} />
+        <KV label="Role" value={dev.role === 'nd' ? 'NEXUS DASHBOARD NODE' : dev.role.toUpperCase()} />
         <KV label="Model" value={<span className="font-mono">{dev.model_id}</span>} />
+        {dev.role === 'nd' && graph.nexusDashboard && (
+          <KV
+            label="Cluster"
+            value={
+              <span>
+                <span className="font-mono">{graph.nexusDashboard.cluster_model_id}</span>{' '}
+                <span className="text-xs text-muted-foreground">
+                  {graph.nexusDashboard.node_count} node{graph.nexusDashboard.node_count === 1 ? '' : 's'} · data {graph.nexusDashboard.data_speed_g}G · mgmt {graph.nexusDashboard.mgmt_speed_g}G
+                  {graph.nexusDashboard.mgmt_leaf_ids ? ' → OOB tier' : ' → OOB cloud'}
+                </span>
+              </span>
+            }
+          />
+        )}
         {dev.smart && <KV label="Smart switch" value="Yes — integrated DPU" />}
         {dev.role === 'leaf' && (
           <KV
@@ -1344,6 +1382,25 @@ function NodeDetails({
         </div>
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" variant="outline" onClick={onGoToRack}>Rack View</Button>
+          <Button size="sm" variant="outline" onClick={onGoToLinks}>Links</Button>
+        </div>
+      </div>
+    )
+  }
+
+  // Phase 17 — the OOB-management cloud: outside the design.
+  if (node.kind === 'cloud') {
+    const mgmtLinks = graph.edges.filter((e) => e.kind === 'nd-mgmt' && (e.source === node.id || e.target === node.id))
+    return (
+      <div className="space-y-3 text-sm">
+        <div className="border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          The Nexus Dashboard management ports (mgmt0 / mgmt1) go to an out-of-band network that is
+          not part of this design. Tick <strong>OOB mgmt</strong> on a tier in Requirements to land
+          them on that tier's switches instead.
+        </div>
+        <KV label="Management cables" value={mgmtLinks.length} />
+        <KV label="Speed" value={mgmtLinks[0] ? `${mgmtLinks[0].speed_g}G` : <Dash />} />
+        <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" variant="outline" onClick={onGoToLinks}>Links</Button>
         </div>
       </div>
@@ -1561,6 +1618,8 @@ function LegendPane({ onClose }: { onClose(): void }) {
           </li>
           <li className="flex items-center gap-2"><span className={glyph}><RouterGlyph /></span> IPN router (Multi-Pod)</li>
           <li className="flex items-center gap-2"><span className={glyph}><ServerIcon className="size-full" strokeWidth={1.6} /></span> Servers — one symbol per leaf or per vPC pair (Actions → Show servers)</li>
+          <li className="flex items-center gap-2"><span className={glyph}><NdGlyph /></span> Nexus Dashboard node (Requirements → Nexus Dashboard); teal bracket = the cluster PID</li>
+          <li className="flex items-center gap-2"><span className={glyph}><Cloud className="size-full" strokeWidth={1.6} /></span> OOB management network outside the design (no tier ticked "OOB mgmt")</li>
           <li className="flex items-center gap-2">
             <span className="w-5 h-3.5 shrink-0" style={{ border: `1.5px dashed ${PEER_LINK_COLOR}` }} />
             vPC pair without a peer-link (ACI, or peer-link off)
@@ -1580,6 +1639,8 @@ function LegendPane({ onClose }: { onClose(): void }) {
             vPC peer-link — port-channel oval across the member cables (leaf ↔ leaf), no label
           </li>
           <li className="flex items-center gap-2"><span className="w-8 border-t border-muted-foreground" /> Server NIC (one line per NIC)</li>
+          <li className="flex items-center gap-2"><span className="w-8 border-t-2 border-link" /> Nexus Dashboard data (fabric0 / fabric1, active-standby, one to each leaf of the pair)</li>
+          <li className="flex items-center gap-2"><span className="w-8 border-t border-dashed border-muted-foreground" /> Nexus Dashboard management (mgmt0 / mgmt1) to the OOB tier or the cloud</li>
           <li className="flex items-center gap-2"><span className="w-8 border-t-2 border-hot" /> Selected</li>
         </ul>
       </section>

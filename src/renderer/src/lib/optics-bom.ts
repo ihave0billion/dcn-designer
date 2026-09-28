@@ -2,6 +2,7 @@ import type { CableLink, CableLinkKind } from '@/schemas/cable-links'
 import type { DesignResult } from '@domain'
 import type { Switch } from '@/schemas/switches'
 import { DEFAULT_CABLE_MEDIA, type CableMedia } from './cable-bom'
+import { ndSpecFor, OOB_MGMT_DEVICE_ID } from '@domain'
 
 // v1.6.2 — transceiver BOM derived from the wiring.
 //
@@ -18,7 +19,7 @@ import { DEFAULT_CABLE_MEDIA, type CableMedia } from './cable-bom'
 //   • an end with no PID still counts — the row says the PID is not set and
 //     carries the switch library's optic hint (form factor) as a pointer.
 
-export type OpticSide = 'spine' | 'leaf' | 'ipn' | 'other'
+export type OpticSide = 'spine' | 'leaf' | 'ipn' | 'nd' | 'other'
 
 export interface OpticsBomRow {
   side: OpticSide
@@ -43,7 +44,7 @@ export interface OpticsBom {
   integrated_ends: number
   /** All distinct port ends seen (transceivers + integrated). */
   total_ends: number
-  by_side: { spine: number; leaf: number; peer_link: number; other: number }
+  by_side: { spine: number; leaf: number; peer_link: number; nd: number; other: number }
 }
 
 export interface BuildOpticsBomInput {
@@ -53,8 +54,8 @@ export interface BuildOpticsBomInput {
   default_media?: CableMedia | null
 }
 
-const SIDE_ORDER: Record<OpticSide, number> = { spine: 0, leaf: 1, ipn: 2, other: 3 }
-const KIND_ORDER: Record<CableLinkKind, number> = { uplink: 0, 'vpc-peer-link': 1, server: 2 }
+const SIDE_ORDER: Record<OpticSide, number> = { spine: 0, leaf: 1, ipn: 2, nd: 3, other: 4 }
+const KIND_ORDER: Record<CableLinkKind, number> = { uplink: 0, 'vpc-peer-link': 1, server: 2, 'nd-data': 3, 'nd-mgmt': 4 }
 
 /** Base port for a breakout sub-port: `Eth1/1/3` → `Eth1/1`; anything else unchanged. */
 export function physicalPort(port: string): { base: string; isSubPort: boolean } {
@@ -70,6 +71,7 @@ function sideOf(role: string | undefined, deviceId: string): OpticSide {
   if (r === 'spine') return 'spine'
   if (r === 'leaf') return 'leaf'
   if (r === 'ipn') return 'ipn'
+  if (r === 'nd') return 'nd'
   return 'other'
 }
 
@@ -100,6 +102,9 @@ export function opticHintForSpeed(sw: Switch | undefined, speed_g: number): stri
 /** Human label for a row's side, shared by the UI and the PDF. */
 export function opticSideLabel(row: Pick<OpticsBomRow, 'side' | 'kind'>): string {
   if (row.kind === 'vpc-peer-link') return 'Leaf (peer-link)'
+  if (row.side === 'nd') return row.kind === 'nd-mgmt' ? 'Nexus Dashboard (mgmt)' : 'Nexus Dashboard (data)'
+  if (row.side === 'leaf' && row.kind === 'nd-data') return 'Leaf (ND data)'
+  if (row.side === 'leaf' && row.kind === 'nd-mgmt') return 'Leaf (ND mgmt)'
   switch (row.side) {
     case 'spine':
       return 'Spine'
@@ -129,13 +134,15 @@ export function buildOpticsBom({ links, design, switches, default_media }: Build
     ends_without_pid: 0,
     integrated_ends: 0,
     total_ends: 0,
-    by_side: { spine: 0, leaf: 0, peer_link: 0, other: 0 }
+    by_side: { spine: 0, leaf: 0, peer_link: 0, nd: 0, other: 0 }
   }
 
   for (const link of links) {
     const kind: CableLinkKind = link.kind ?? 'uplink'
     const media: CableMedia = link.media ?? defaultMedia
     for (const end of [link.device_a, link.device_b]) {
+      // Phase 17 — the OOB cloud is not a port: nothing to order on that end.
+      if (end.device_id === OOB_MGMT_DEVICE_ID) continue
       const { base, isSubPort } = physicalPort(end.port)
       const endKey = `${end.device_id}|${base}`
       if (seenEnds.has(endKey)) continue
@@ -155,7 +162,14 @@ export function buildOpticsBom({ links, design, switches, default_media }: Build
         ? (design.breakout?.recommended_pair?.spine_pid ?? link.optic_id ?? null)
         : (link.optic_id ?? null)
       const model_id = info?.model_id ?? null
-      const optic_hint = model_id ? opticHintForSpeed(switchById.get(model_id), speed_g) : null
+      const ndSpec = side === 'nd' ? ndSpecFor(model_id) : null
+      const optic_hint = ndSpec
+        ? kind === 'nd-mgmt'
+          ? (ndSpec.mgmt_optic_hint[speed_g] ?? 'SFP+')
+          : ndSpec.data_optic_hint
+        : model_id
+          ? opticHintForSpeed(switchById.get(model_id), speed_g)
+          : null
 
       const key = `${side}|${kind}|${model_id ?? ''}|${speed_g}|${media}|${optic_id ?? ''}`
       const existing = rows.get(key)
@@ -167,6 +181,7 @@ export function buildOpticsBom({ links, design, switches, default_media }: Build
       if (kind === 'vpc-peer-link') bom.by_side.peer_link += 1
       else if (side === 'spine') bom.by_side.spine += 1
       else if (side === 'leaf') bom.by_side.leaf += 1
+      else if (side === 'nd') bom.by_side.nd += 1
       else bom.by_side.other += 1
     }
   }

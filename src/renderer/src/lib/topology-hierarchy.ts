@@ -5,6 +5,7 @@ import {
   type TopologyRole
 } from './topology-extractor'
 import { nicLabel, type ServerInfoResolver } from './server-symbols'
+import { OOB_MGMT_LABEL } from '@domain'
 
 // Nexus Dashboard–style hierarchical topology (v1.1).
 //
@@ -66,6 +67,8 @@ export interface Fabric {
   podIndex: number | null
   spineIds: string[]
   leafIds: string[]
+  // Phase 17 — Nexus Dashboard nodes attached to this fabric's leaves.
+  ndIds: string[]
 }
 
 // Partition the graph into fabrics. Spines carry `pod_index` only on
@@ -75,6 +78,7 @@ export interface Fabric {
 export function buildFabrics(graph: TopologyGraph, fabricName: string): Fabric[] {
   const spines = graph.nodes.filter((n) => n.role === 'spine')
   const leaves = graph.nodes.filter((n) => n.role === 'leaf')
+  const nds = graph.nodes.filter((n) => n.role === 'nd')
   const spinePods = [...new Set(spines.map((s) => s.pod_index).filter((p): p is number => p != null))]
     .sort((a, b) => a - b)
 
@@ -85,7 +89,8 @@ export function buildFabrics(graph: TopologyGraph, fabricName: string): Fabric[]
         label: fabricName || 'Fabric',
         podIndex: null,
         spineIds: spines.map((s) => s.id),
-        leafIds: leaves.map((l) => l.id)
+        leafIds: leaves.map((l) => l.id),
+        ndIds: nds.map((n) => n.id)
       }
     ]
   }
@@ -95,13 +100,23 @@ export function buildFabrics(graph: TopologyGraph, fabricName: string): Fabric[]
     label: `Pod ${pod + 1}`,
     podIndex: pod,
     spineIds: spines.filter((s) => s.pod_index === pod).map((s) => s.id),
-    leafIds: []
+    leafIds: [],
+    ndIds: []
   }))
   // Spines without a pod on a multi-pod design — keep them visible in pod 1.
   for (const s of spines) if (s.pod_index == null) fabrics[0].spineIds.push(s.id)
+  const fabricOfLeaf = new Map<string, Fabric>()
   for (const l of leaves) {
     const f = fabrics.find((x) => x.podIndex === l.pod_index) ?? fabrics[0]
     f.leafIds.push(l.id)
+    fabricOfLeaf.set(l.id, f)
+  }
+  // Phase 17 — a Nexus Dashboard node follows the leaf its data links reach.
+  for (const n of nds) {
+    const e = graph.edges.find((x) => x.kind === 'nd-data' && (x.source === n.id || x.target === n.id))
+    const leafId = e ? (e.source === n.id ? e.target : e.source) : null
+    const f = (leafId && fabricOfLeaf.get(leafId)) || fabrics[0]
+    f.ndIds.push(n.id)
   }
   return fabrics
 }
@@ -116,7 +131,8 @@ export type SceneLevel =
   | { kind: 'devices'; fabricId: string }
 
 // Phase 14 adds 'server': the "Show servers" symbol under a leaf or a vPC pair.
-export type SceneNodeKind = 'fabric' | 'group' | 'device' | 'ipn' | 'server'
+// Phase 17 adds 'cloud': the OOB-management network outside the design.
+export type SceneNodeKind = 'fabric' | 'group' | 'device' | 'ipn' | 'server' | 'cloud'
 
 // Phase 14 — the server symbol's payload (decision 7/8).
 export interface SceneServer {
@@ -147,11 +163,16 @@ export interface SceneNode {
   // Phase 14 — server symbols sort under their leaves rather than by label.
   sortKey?: string
   server?: SceneServer
+  // Phase 17 — tiles that are not row-packed but centred under other tiles
+  // (ND nodes under their attach leaves, the OOB cloud under the ND nodes).
+  anchorIds?: string[]
 }
 
 // Phase 14 — how an edge is drawn: fabric links (spine↔leaf), inter-pod
 // links (dashed), vPC peer-links (red) and server lines (thin, one per NIC).
-export type SceneEdgeKind = 'fabric' | 'ipn' | 'vpc-peer-link' | 'server'
+// Phase 17 — Nexus Dashboard data links (solid, link colour) and management
+// links (dashed, muted).
+export type SceneEdgeKind = 'fabric' | 'ipn' | 'vpc-peer-link' | 'server' | 'nd-data' | 'nd-mgmt'
 
 export interface SceneEdge {
   id: string
@@ -170,6 +191,8 @@ export interface SceneEdge {
 // switched off) so the renderer joins them with a bracket instead.
 export interface ScenePair {
   id: string
+  // Phase 17 — 'nd' is the Nexus Dashboard cluster bracket (always drawn).
+  kind: 'vpc' | 'nd'
   memberIds: string[]
   label: string
   bracket: boolean
@@ -192,7 +215,7 @@ export interface SceneOptions {
 
 export const SERVER_NODE_ID = (key: string): string => `server:${key}`
 
-export const GROUP_ID = (fabricId: string, role: 'spine' | 'leaf'): string =>
+export const GROUP_ID = (fabricId: string, role: 'spine' | 'leaf' | 'nd'): string =>
   `group:${fabricId}:${role}`
 
 export function buildScene(
@@ -206,6 +229,7 @@ export function buildScene(
   for (const f of fabrics) {
     for (const id of f.spineIds) fabricOf.set(id, f)
     for (const id of f.leafIds) fabricOf.set(id, f)
+    for (const id of f.ndIds) fabricOf.set(id, f)
   }
   const statusOf = new Map(graph.nodes.map((n) => [n.id, deviceStatus(n, graph)]))
   const fabricStatus = (f: Fabric): HealthStatus =>
@@ -219,10 +243,12 @@ export function buildScene(
     id: f.id,
     kind: 'fabric',
     label: f.label,
-    sublabel: `${f.spineIds.length} spine${f.spineIds.length === 1 ? '' : 's'} · ${f.leafIds.length} lea${f.leafIds.length === 1 ? 'f' : 'ves'}`,
+    sublabel:
+      `${f.spineIds.length} spine${f.spineIds.length === 1 ? '' : 's'} · ${f.leafIds.length} lea${f.leafIds.length === 1 ? 'f' : 'ves'}` +
+      (f.ndIds.length ? ` · ND ×${f.ndIds.length}` : ''),
     role: null,
-    memberIds: [...f.spineIds, ...f.leafIds],
-    count: f.spineIds.length + f.leafIds.length,
+    memberIds: [...f.spineIds, ...f.leafIds, ...f.ndIds],
+    count: f.spineIds.length + f.leafIds.length + f.ndIds.length,
     status: fabricStatus(f),
     fabricId: f.id,
     device: null,
@@ -241,13 +267,13 @@ export function buildScene(
     device: n,
     tier: 0
   })
-  const groupTile = (f: Fabric, role: 'spine' | 'leaf'): SceneNode => {
-    const ids = role === 'spine' ? f.spineIds : f.leafIds
+  const groupTile = (f: Fabric, role: 'spine' | 'leaf' | 'nd'): SceneNode => {
+    const ids = role === 'spine' ? f.spineIds : role === 'leaf' ? f.leafIds : f.ndIds
     const models = [...new Set(ids.map((id) => byId.get(id)?.model_id).filter(Boolean))]
     return {
       id: GROUP_ID(f.id, role),
       kind: 'group',
-      label: role === 'spine' ? 'Spines' : 'Leaves',
+      label: role === 'spine' ? 'Spines' : role === 'leaf' ? 'Leaves' : 'Nexus Dashboard',
       sublabel: models.length === 1 ? String(models[0]) : `${models.length} models`,
       role,
       memberIds: ids,
@@ -255,9 +281,11 @@ export function buildScene(
       status: worstStatus(ids.map((id) => statusOf.get(id) ?? 'unknown')),
       fabricId: f.id,
       device: null,
-      tier: role === 'spine' ? 1 : 2
+      tier: role === 'spine' ? 1 : role === 'leaf' ? 2 : 3
     }
   }
+  // Phase 17 — ND node tiles sit centred under the leaves their data links reach.
+  const ndAnchors = (graph.nexusDashboard?.data_leaf_ids ?? []).filter((id, i, arr) => arr.indexOf(id) === i)
   const deviceTile = (n: TopologyNode, f: Fabric): SceneNode => ({
     id: n.id,
     kind: 'device',
@@ -269,11 +297,29 @@ export function buildScene(
     status: statusOf.get(n.id) ?? 'unknown',
     fabricId: f.id,
     device: n,
-    tier: n.role === 'spine' ? 1 : 2
+    tier: n.role === 'spine' ? 1 : n.role === 'nd' ? 3 : 2,
+    ...(n.role === 'nd' && ndAnchors.length ? { anchorIds: ndAnchors } : {})
+  })
+  // Phase 17 — the OOB-management cloud: external at the fabrics level (under
+  // the globe), under the ND nodes otherwise.
+  const cloudTile = (n: TopologyNode): SceneNode => ({
+    id: n.id,
+    kind: 'cloud',
+    label: n.label || OOB_MGMT_LABEL,
+    sublabel: 'outside this design',
+    role: 'oob',
+    memberIds: [n.id],
+    count: 1,
+    status: 'healthy',
+    fabricId: null,
+    device: n,
+    tier: level.kind === 'fabrics' ? 2 : 4,
+    ...(level.kind === 'devices' && currentFabric?.ndIds.length ? { anchorIds: [...currentFabric.ndIds] } : {})
   })
 
   // Seed the nodes that always appear at this level.
   const ipns = graph.nodes.filter((n) => n.role === 'ipn')
+  const clouds = graph.nodes.filter((n) => n.role === 'oob')
   if (level.kind === 'fabrics') {
     for (const f of fabrics) nodes.set(f.id, fabricTile(f, 1))
     for (const n of ipns) nodes.set(n.id, ipnTile(n))
@@ -283,17 +329,17 @@ export function buildScene(
         nodes.set(GROUP_ID(currentFabric.id, 'spine'), groupTile(currentFabric, 'spine'))
       if (currentFabric.leafIds.length > 0)
         nodes.set(GROUP_ID(currentFabric.id, 'leaf'), groupTile(currentFabric, 'leaf'))
+      if (currentFabric.ndIds.length > 0)
+        nodes.set(GROUP_ID(currentFabric.id, 'nd'), groupTile(currentFabric, 'nd'))
     } else {
-      for (const id of currentFabric.spineIds) {
-        const n = byId.get(id)
-        if (n) nodes.set(id, deviceTile(n, currentFabric))
-      }
-      for (const id of currentFabric.leafIds) {
+      for (const id of [...currentFabric.spineIds, ...currentFabric.leafIds, ...currentFabric.ndIds]) {
         const n = byId.get(id)
         if (n) nodes.set(id, deviceTile(n, currentFabric))
       }
     }
   }
+  // Phase 17 — the OOB cloud is always visible when the design has one.
+  for (const n of clouds) nodes.set(n.id, cloudTile(n))
 
   // Where does a cable endpoint land at this level? null = not shown.
   const endpointNode = (deviceId: string): SceneNode | null => {
@@ -301,6 +347,10 @@ export function buildScene(
     if (!dev) return null
     if (dev.role === 'ipn') {
       if (!nodes.has(dev.id)) nodes.set(dev.id, ipnTile(dev))
+      return nodes.get(dev.id)!
+    }
+    if (dev.role === 'oob') {
+      if (!nodes.has(dev.id)) nodes.set(dev.id, cloudTile(dev))
       return nodes.get(dev.id)!
     }
     const f = fabricOf.get(deviceId)
@@ -313,7 +363,7 @@ export function buildScene(
       return nodes.get(f.id)!
     }
     if (level.kind === 'fabric') {
-      const role = dev.role === 'spine' ? 'spine' : 'leaf'
+      const role = dev.role === 'spine' ? 'spine' : dev.role === 'nd' ? 'nd' : 'leaf'
       return nodes.get(GROUP_ID(f.id, role)) ?? null
     }
     return nodes.get(dev.id) ?? null
@@ -327,7 +377,13 @@ export function buildScene(
     // Normalise direction so spine→leaf, ipn→spine, ipn→fabric read top-down.
     const [a, b] = s.tier <= t.tier ? [s, t] : [t, s]
     const kind: SceneEdgeKind =
-      e.kind === 'vpc-peer-link' ? 'vpc-peer-link' : s.role === 'ipn' || t.role === 'ipn' ? 'ipn' : 'fabric'
+      e.kind === 'vpc-peer-link'
+        ? 'vpc-peer-link'
+        : e.kind === 'nd-data' || e.kind === 'nd-mgmt'
+          ? e.kind
+          : s.role === 'ipn' || t.role === 'ipn'
+            ? 'ipn'
+            : 'fabric'
     const key = opts.aggregate ? `${a.id}|${b.id}|${kind}` : `link:${e.id}`
     const existing = edgeMap.get(key)
     if (existing) {
@@ -362,9 +418,21 @@ export function buildScene(
       if (!nodes.has(p.members[0]) || !nodes.has(p.members[1])) continue
       pairs.push({
         id: p.id,
+        kind: 'vpc',
         memberIds: [...p.members],
         label: 'vPC pair',
         bracket: !peerLinked.has(`${p.members[0]}|${p.members[1]}`)
+      })
+    }
+    // Phase 17 — the Nexus Dashboard cluster bracket around its node tiles.
+    const ndTiles = [...nodes.values()].filter((n) => n.kind === 'device' && n.role === 'nd')
+    if (ndTiles.length > 0) {
+      pairs.push({
+        id: 'nd-cluster',
+        kind: 'nd',
+        memberIds: ndTiles.map((n) => n.id),
+        label: graph.nexusDashboard?.cluster_model_id ?? 'Nexus Dashboard',
+        bracket: true
       })
     }
 
@@ -428,7 +496,7 @@ export function buildScene(
 
 export function edgeLabel(e: Pick<SceneEdge, 'count' | 'speeds' | 'totalG'> & { kind?: SceneEdgeKind }): string {
   const base = e.count === 1 ? `${e.speeds[0]}G` : e.speeds.length === 1 ? `${e.count} × ${e.speeds[0]}G` : `${e.count} links · ${e.totalG}G`
-  return e.kind === 'vpc-peer-link' ? `${base} peer-link` : base
+  return e.kind === 'vpc-peer-link' ? `${base} peer-link` : e.kind === 'nd-mgmt' ? `${base} mgmt` : base
 }
 
 function breadcrumbFor(level: SceneLevel, fabrics: Fabric[]): Scene['breadcrumb'] {
@@ -540,9 +608,16 @@ export function layoutScene(
 ): Map<string, Point> {
   const tiers = new Map<number, SceneNode[]>()
   const servers: SceneNode[] = []
+  // Phase 17 — anchored tiles (ND nodes, the OOB cloud) are centred under
+  // their anchors in their own slot instead of being row-packed.
+  const anchored: SceneNode[] = []
   for (const n of nodes) {
     if (n.kind === 'server' && n.server) {
       servers.push(n)
+      continue
+    }
+    if (n.anchorIds && n.anchorIds.length > 0) {
+      anchored.push(n)
       continue
     }
     const arr = tiers.get(n.tier) ?? []
@@ -599,6 +674,20 @@ export function layoutScene(
       along: anchors.length ? anchors.reduce((a, p) => a + p.along, 0) / anchors.length : 0,
       across
     })
+  }
+
+  // Anchored tiles: one slot per tier below everything else; a tier's tiles
+  // sit side by side, centred on the mean position of their anchors (lower
+  // tiers first so the cloud can anchor to the ND row).
+  const anchorTiers = [...new Set(anchored.map((n) => n.tier))].sort((a, b) => a - b)
+  for (const t of anchorTiers) {
+    const group = anchored.filter((n) => n.tier === t).sort((a, b) => comparePortNames(a.sortKey ?? a.label, b.sortKey ?? b.label))
+    const across = slot++ * (TILE_H + TIER_GAP)
+    const pts = group.flatMap((n) => n.anchorIds!.map((id) => local.get(id)).filter((p): p is NonNullable<typeof p> => !!p))
+    const centre = pts.length ? pts.reduce((a, p) => a + p.along, 0) / pts.length : Math.max(0, widest - TILE_W) / 2
+    const groupWidth = group.length * stride - TILE_GAP
+    // `centre` is a mean of tile LEFT edges; the group's own centre sits at centre + TILE_W / 2.
+    group.forEach((n, i) => local.set(n.id, { along: centre + TILE_W / 2 - groupWidth / 2 + i * stride, across }))
   }
 
   const out = new Map<string, Point>()

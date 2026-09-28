@@ -162,6 +162,15 @@ export function SummaryView({
               />
               <Stat k="Pods" v={String(podCount)} />
               <Stat k="IPN routers" v={ipnCount > 0 ? String(ipnCount) : '—'} />
+              <Stat
+                k="Nexus Dashboard"
+                v={design.nexus_dashboard ? design.nexus_dashboard.cluster_model_id : '—'}
+                sub={
+                  design.nexus_dashboard
+                    ? `${design.nexus_dashboard.node_count} × ${design.nexus_dashboard.node_model_id} · mgmt ${design.nexus_dashboard.mgmt_leaf_ids ? 'to OOB tier' : 'to OOB cloud'}`
+                    : undefined
+                }
+              />
               <Stat k="Racks" v={String(rackCount)} />
               <Stat k="Cable links" v={String(cableBom.total_links)} />
               <Stat k="Host bandwidth" v={`${summary.total_host_bw_g.toLocaleString()} G`} />
@@ -214,6 +223,12 @@ export function SummaryView({
                 </TableBody>
               </Table>
             </div>
+            {deviceBom.nd_cluster && (
+              <p className="text-xs text-muted-foreground">
+                Nexus Dashboard: {deviceBom.nd_cluster.node_count} × {deviceBom.nd_cluster.node_model_id} ordered as
+                one <span className="font-mono">{deviceBom.nd_cluster.cluster_model_id}</span>.
+              </p>
+            )}
             {deviceBom.has_estimated_power && (
               <p className="text-xs text-muted-foreground">
                 † estimated — the library has no power figure for this model; totals assume the

@@ -240,11 +240,15 @@ export function buildCableBom({ links, cable_tray_m, default_media }: BuildCable
   }
 }
 
-const KIND_ORDER: Record<CableLinkKind, number> = { uplink: 0, 'vpc-peer-link': 1, server: 2 }
+const KIND_ORDER: Record<CableLinkKind, number> = { uplink: 0, 'vpc-peer-link': 1, server: 2, 'nd-data': 3, 'nd-mgmt': 4 }
 
 /** Short label for a BOM row's kind, shared by the UI and the PDF. */
 export function cableKindLabel(kind: CableLinkKind): string {
   switch (kind) {
+    case 'nd-data':
+      return 'ND data'
+    case 'nd-mgmt':
+      return 'ND mgmt'
     case 'vpc-peer-link':
       return 'vPC peer-link'
     case 'server':

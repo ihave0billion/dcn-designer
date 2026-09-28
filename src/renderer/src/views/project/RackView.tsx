@@ -51,6 +51,7 @@ import {
 } from '@/lib/library-io'
 import { useWorkspace } from '@/state/WorkspaceContext'
 import type { DesignResult, RackPlacement } from '@domain'
+import { ND_NODE_POWER_W, ndSpecFor } from '@domain'
 import { AddDeviceDialog } from './AddDeviceDialog'
 
 interface RackViewProps {
@@ -148,6 +149,8 @@ export function RackView({
   const powerForDevice = useCallback(
     (d: RackMappingDevice): number => {
       if (d.role === 'blank') return 0
+      // Phase 17 — Nexus Dashboard nodes: catalogue estimate.
+      if (d.role === 'nd') return ndSpecFor(d.model_id)?.power_w ?? ND_NODE_POWER_W
       const sw = d.model_id ? switchById.get(d.model_id) : null
       if (sw) return sw.power_w ?? DEFAULT_SWITCH_POWER_W
       const sv = d.model_id ? serverById.get(d.model_id) : null
@@ -778,6 +781,8 @@ function deviceColor(role: RackMappingDevice['role']): string {
       return 'bg-emerald-100 border-emerald-300 text-emerald-900 dark:bg-emerald-950/60 dark:border-emerald-800 dark:text-emerald-200 hover:bg-emerald-200/80'
     case 'ipn':
       return 'bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-950/60 dark:border-amber-800 dark:text-amber-200 hover:bg-amber-200/80'
+    case 'nd':
+      return 'bg-teal-100 border-teal-300 text-teal-900 dark:bg-teal-950/60 dark:border-teal-800 dark:text-teal-200 hover:bg-teal-200/80'
     case 'blank':
       return 'bg-muted/50 border-dashed border-muted-foreground/40 text-muted-foreground hover:bg-muted'
   }
@@ -965,10 +970,11 @@ function DevicePropertiesPanel({
   const sw = device.role !== 'blank' && device.model_id ? switches.find((s) => s.id === device.model_id) : null
   const sv = device.role === 'server' && device.model_id ? servers.find((s) => s.id === device.model_id) : null
 
+  const nd = device.role === 'nd' ? ndSpecFor(device.model_id) : null
   const modelOptions =
     device.role === 'server'
       ? servers
-      : device.role === 'blank'
+      : device.role === 'blank' || device.role === 'nd'
         ? []
         : switches.filter((s) => (device.role === 'spine' ? s.role !== 'leaf' : s.role !== 'spine'))
 
@@ -1015,7 +1021,15 @@ function DevicePropertiesPanel({
           />
         </Field>
 
-        {device.role === 'blank' ? (
+        {device.role === 'nd' ? (
+          <Field label="Model">
+            <div className="text-sm font-mono">{device.model_id}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Nexus Dashboard node — the cluster is chosen on the Requirements tab
+              {nd ? ` (${nd.cluster_model_id}, ${nd.ru}RU per node)` : ''}.
+            </p>
+          </Field>
+        ) : device.role === 'blank' ? (
           <Field label="Height (U)">
             <Input
               type="number"

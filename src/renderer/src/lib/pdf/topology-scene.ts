@@ -1,5 +1,6 @@
 import type { TopologyLayoutFile } from '@/schemas/topology-layout'
 import type { TopologyGraph, TopologyRole } from '@/lib/topology-extractor'
+import { ndSpecFor } from '@domain'
 import {
   buildFabrics,
   buildScene,
@@ -74,6 +75,8 @@ export interface PdfSceneEdge {
 /** Phase 14 — a vPC pair drawn as a bracket (no peer-link between the members). */
 export interface PdfScenePair {
   id: string
+  /** Phase 17 — 'nd' = the Nexus Dashboard cluster bracket. */
+  kind: 'vpc' | 'nd'
   label: string
   x: number
   y: number
@@ -90,7 +93,7 @@ export interface PdfScenePage {
   nodes: PdfSceneNode[]
   edges: PdfSceneEdge[]
   pairs: PdfScenePair[]
-  counts: Record<'spine' | 'leaf' | 'ipn' | 'server', number>
+  counts: Record<'spine' | 'leaf' | 'ipn' | 'server' | 'nd' | 'oob', number>
   /** Phase 14 — peer-link bundles drawn on this page. */
   peerLinks: number
   /** Set when the wiring would obscure the page; edges are then not drawn. */
@@ -120,6 +123,9 @@ export interface PdfSceneOptions {
 /** Server symbol footprint (a generic 1RU box when there is no artwork). */
 export const SERVER_W = 64
 export const SERVER_H = 20
+/** Phase 17 — the OOB-management cloud (an ellipse). */
+export const CLOUD_W = 96
+export const CLOUD_H = 44
 /** Padding of the pair bracket around its member tiles. */
 export const PAIR_PAD = 6
 
@@ -176,17 +182,17 @@ export function buildPdfScenePages(
     const { positions, custom } = resolveScenePositions(scene, layoutFile, orientation, { rowMax: opts.rowMax })
 
     const nodes: PdfSceneNode[] = []
-    const counts = { spine: 0, leaf: 0, ipn: 0, server: 0 }
+    const counts = { spine: 0, leaf: 0, ipn: 0, server: 0, nd: 0, oob: 0 }
     for (const n of scene.nodes) {
       const p = positions.get(n.id) ?? { x: 0, y: 0 }
       const modelId =
         n.kind === 'server'
           ? (n.server?.modelId ?? 'server')
           : n.device?.model_id ?? (n.kind === 'ipn' ? (n.sublabel ?? 'unknown') : 'unknown')
-      const ru = n.kind === 'server' ? (n.server?.ru ?? 1) : opts.ruOf?.(modelId) ?? 1
-      const img = opts.images?.get(modelId) ?? null
-      let w = n.kind === 'server' ? SERVER_W : PANEL_W
-      let h = n.kind === 'server' ? Math.max(SERVER_H, RU_PX * ru) : Math.max(MIN_PANEL_H, RU_PX * ru)
+      const ru = n.kind === 'server' ? (n.server?.ru ?? 1) : opts.ruOf?.(modelId) ?? ndSpecFor(modelId)?.ru ?? 1
+      const img = n.kind === 'cloud' ? null : opts.images?.get(modelId) ?? null
+      let w = n.kind === 'server' ? SERVER_W : n.kind === 'cloud' ? CLOUD_W : PANEL_W
+      let h = n.kind === 'server' ? Math.max(SERVER_H, RU_PX * ru) : n.kind === 'cloud' ? CLOUD_H : Math.max(MIN_PANEL_H, RU_PX * ru)
       if (img) {
         // Keep the raster's shape: a front panel is ~11:1, an isometric photo ~1.25:1.
         h = Math.max(MIN_PANEL_H, w / img.aspect)
@@ -200,7 +206,7 @@ export function buildPdfScenePages(
       const labelAbove = orientation === 'vertical' && (n.role === 'spine' || n.role === 'ipn')
       const x = cx - w / 2
       const y = cy - h / 2
-      if (n.role) counts[n.role] += 1
+      if (n.role && n.role in counts) counts[n.role] += 1
       if (n.kind === 'server') counts.server += 1
       nodes.push({
         id: n.id,
@@ -258,22 +264,23 @@ export function buildPdfScenePages(
           y2: p2.y,
           count: e.count,
           label: e.label,
-          dashed: a.role === 'ipn' || b.role === 'ipn'
+          dashed: a.role === 'ipn' || b.role === 'ipn' || e.kind === 'nd-mgmt'
         })
       }
     }
 
     // Phase 14 — bracket around the two tiles of a pair that has no peer-link.
+    // Phase 17 — and around the Nexus Dashboard node tiles (any count).
     const pairs: PdfScenePair[] = []
     for (const p of scene.pairs) {
       if (!p.bracket) continue
       const tiles = p.memberIds.map((id) => positions.get(id)).filter((t): t is NonNullable<typeof t> => !!t)
-      if (tiles.length < 2) continue
+      if (tiles.length < (p.kind === 'nd' ? 1 : 2)) continue
       const x0 = Math.min(...tiles.map((t) => t.x)) - PAIR_PAD
       const y0 = Math.min(...tiles.map((t) => t.y)) - PAIR_PAD
       const x1 = Math.max(...tiles.map((t) => t.x + TILE_W)) + PAIR_PAD
       const y1 = Math.max(...tiles.map((t) => t.y + TILE_H)) + PAIR_PAD
-      pairs.push({ id: p.id, label: p.label, x: x0, y: y0, w: x1 - x0, h: y1 - y0 })
+      pairs.push({ id: p.id, kind: p.kind, label: p.label, x: x0, y: y0, w: x1 - x0, h: y1 - y0 })
     }
 
     // Page extent from the geometry (labels included), padded, origin shifted to 0.

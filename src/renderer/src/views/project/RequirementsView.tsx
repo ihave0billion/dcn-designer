@@ -36,6 +36,9 @@ import type { Server } from '@/schemas/servers'
 import { effectiveVpc, FABRIC_MODE_LABEL, PEER_LINK_MEMBERS_MAX, PEER_LINK_MEMBERS_MIN, type FabricMode } from '@/schemas/project'
 import type { CableLinkMedia } from '@/schemas/cable-links'
 import { CABLE_MEDIA_OPTIONS } from '@/lib/cable-bom'
+import { ND_CLUSTERS, ND_CLUSTER_IDS, ND_DATA_SPEEDS_G, ND_MGMT_SPEEDS_G, type DesignResult } from '@domain'
+import { EMPTY_NEXUS_DASHBOARD, type NexusDashboard } from '@/schemas/project'
+import { loadLeafPairs } from '@/lib/library-io'
 import { loadSwitchesFile, loadIpnRouters, type IpnRouterFileEntry,
   loadServersFile
 } from '@/lib/library-io'
@@ -53,6 +56,7 @@ const SECTIONS = [
   { id: 'use-case', label: 'Use case' },
   { id: 'tiers', label: 'Tiers' },
   { id: 'fabric', label: 'Fabric' },
+  { id: 'nexus-dashboard', label: 'Nexus Dashboard' },
   { id: 'constraints', label: 'Constraints' },
   { id: 'racks', label: 'Racks' },
   { id: 'cable', label: 'Cable tray' },
@@ -71,6 +75,8 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
   const [switches, setSwitches] = useState<Switch[]>([])
   const [ipnRouters, setIpnRouters] = useState<IpnRouterFileEntry[]>([])
   const [servers, setServers] = useState<Server[]>([])
+  // Phase 17 — leaf pairs of the current design, for the Nexus Dashboard attach select.
+  const [pairOptions, setPairOptions] = useState<Array<{ id: string; members: [string, string] }>>([])
   const [librarySnoozed, setLibrarySnoozed] = useState<boolean>(() => {
     return localStorage.getItem(LIBRARY_REVIEW_KEY(projectPath)) === '1'
   })
@@ -101,6 +107,34 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
   }, [workspacePath])
 
   const vpc = useMemo(() => effectiveVpc(form.fabric), [form.fabric])
+
+  // Phase 17 — pair ids come from leaf_pairs.yaml (user fork) else design.vpc.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const fork = await loadLeafPairs(projectPath).catch(() => null)
+        if (fork?.pairs?.length) {
+          if (!cancelled) setPairOptions(fork.pairs.map((p) => ({ id: p.id, members: [p.members[0], p.members[1]] })))
+          return
+        }
+        const exists = await window.dcn.fileExists(`${projectPath}/design.yaml`)
+        if (!exists) return
+        const design = (await window.dcn.readYaml(`${projectPath}/design.yaml`)) as DesignResult
+        if (!cancelled) setPairOptions((design.vpc?.pairs ?? []).map((p) => ({ id: p.id, members: [p.members[0], p.members[1]] })))
+      } catch {
+        // no design yet — the select only offers "auto"
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [projectPath])
+
+  const nd: NexusDashboard = form.nexus_dashboard ?? EMPTY_NEXUS_DASHBOARD
+  function patchNd(next: Partial<NexusDashboard>): void {
+    patch('nexus_dashboard', { ...nd, ...next })
+  }
 
   const leafCandidates = useMemo(
     () => switches.filter((s) => s.role === 'leaf' || s.role === 'both'),
@@ -411,13 +445,14 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                     <TableHead className="w-32">Uplink override (G)</TableHead>
                     <TableHead className="w-44">Server model</TableHead>
                     <TableHead className="w-12">vPC</TableHead>
+                    <TableHead className="w-16" title="This tier is the out-of-band management network (Nexus Dashboard mgmt0/1 land here)">OOB mgmt</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {form.tiers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                         No tiers yet. Add a row to describe a leaf-side speed tier.
                       </TableCell>
                     </TableRow>
@@ -524,6 +559,15 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                             aria-label="vPC-pair this tier's leaves"
                             title="vPC-pair this tier's leaves (off = no pairs, no peer-link)"
                             onCheckedChange={(v) => patchTier(setForm, idx, { vpc_pairs: !!v })}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {/* Phase 17 — the Nexus Dashboard management links land on this tier. */}
+                          <Checkbox
+                            checked={tier.oob_management ?? false}
+                            aria-label="This tier is the OOB management network"
+                            title="This tier is the out-of-band management network — Nexus Dashboard mgmt0/mgmt1 cables land on its first pair. Untick everywhere = the links go to an OOB cloud."
+                            onCheckedChange={(v) => patchTier(setForm, idx, { oob_management: !!v })}
                           />
                         </TableCell>
                         <TableCell>
@@ -743,6 +787,111 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                 solver reserves {`${4}`} ports per spine per IPN.
               </p>
             </div>
+          </Section>
+
+          <Section
+            id="nexus-dashboard"
+            title="Nexus Dashboard"
+            description="Optional physical Nexus Dashboard cluster. Each node wires fabric0/fabric1 (active-standby) to the two leaves of a pair and mgmt0/mgmt1 to the OOB management tier — or to an OOB cloud when no tier is ticked OOB mgmt."
+          >
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Cluster">
+                <Select
+                  value={nd.cluster_model_id ?? '__none'}
+                  onValueChange={(v) =>
+                    patchNd({ cluster_model_id: v === '__none' ? null : (v as NexusDashboard['cluster_model_id']) })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="(none)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">(none — no Nexus Dashboard in this design)</SelectItem>
+                    {ND_CLUSTER_IDS.map((id) => (
+                      <SelectItem key={id} value={id}>
+                        {id} · {ND_CLUSTERS[id].display}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Nodes">
+                <Select
+                  value={String(nd.node_count)}
+                  onValueChange={(v) => patchNd({ node_count: Number(v) })}
+                >
+                  <SelectTrigger disabled={!nd.cluster_model_id}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="3">3 nodes (the cluster PID)</SelectItem>
+                    <SelectItem value="1">1 node (single-node cluster)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Data links (fabric0 / fabric1)">
+                <Select
+                  value={String(nd.data_speed_g)}
+                  onValueChange={(v) => patchNd({ data_speed_g: Number(v) as NexusDashboard['data_speed_g'] })}
+                >
+                  <SelectTrigger disabled={!nd.cluster_model_id}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ND_DATA_SPEEDS_G.map((g) => (
+                      <SelectItem key={g} value={String(g)}>
+                        {g}G per port · 2 per node, one to each leaf of the pair
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Management links (mgmt0 / mgmt1)">
+                <Select
+                  value={String(nd.mgmt_speed_g)}
+                  onValueChange={(v) => patchNd({ mgmt_speed_g: Number(v) as NexusDashboard['mgmt_speed_g'] })}
+                >
+                  <SelectTrigger disabled={!nd.cluster_model_id}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ND_MGMT_SPEEDS_G.map((g) => (
+                      <SelectItem key={g} value={String(g)}>
+                        {g}G per port · 2 per node
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Attach to leaf pair">
+                <Select
+                  value={nd.attach_pair_id ?? '__auto'}
+                  onValueChange={(v) => patchNd({ attach_pair_id: v === '__auto' ? null : v })}
+                >
+                  <SelectTrigger disabled={!nd.cluster_model_id}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__auto">Auto — first pair of the first data tier</SelectItem>
+                    {pairOptions.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.id} · {p.members[0]} + {p.members[1]}
+                      </SelectItem>
+                    ))}
+                    {nd.attach_pair_id && !pairOptions.some((p) => p.id === nd.attach_pair_id) ? (
+                      <SelectItem value={nd.attach_pair_id}>{nd.attach_pair_id} (not in the current design)</SelectItem>
+                    ) : null}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {nd.cluster_model_id
+                ? form.tiers.some((t) => t.oob_management)
+                  ? 'Management links land on the tier ticked "OOB mgmt" in the Tiers table.'
+                  : 'No tier is ticked "OOB mgmt" — the topology draws the management links to an OOB network cloud outside this design.'
+                : 'Pick a cluster to add it to the design; it appears on the Topology tab, in the rack layout and on the BOM after Generate design.'}
+            </p>
           </Section>
 
           <Section id="constraints" title="Constraints" description="Solver filters and notes.">
@@ -1048,7 +1197,8 @@ function addTier(setForm: React.Dispatch<React.SetStateAction<RequirementsFile>>
         leaf_model_id: null,
         override_uplink_speed_g: null,
         server_model_id: null,
-        vpc_pairs: true
+        vpc_pairs: true,
+        oob_management: false
       }
     ]
   }))

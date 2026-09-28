@@ -214,11 +214,13 @@ export function LinksView({ requirements, projectPath, onGoToDesign }: LinksView
 
   // Used for unknown-device warnings + CSV import filter.
   const validDeviceIds = useMemo(() => {
-    const out = { spineIds: new Set<string>(), leafIds: new Set<string>() }
+    const out = { spineIds: new Set<string>(), leafIds: new Set<string>(), ndIds: new Set<string>() }
     for (const s of spines) out.spineIds.add(s.device_id)
     for (const l of leaves) out.leafIds.add(l.device_id)
+    // Phase 17 — Nexus Dashboard nodes (device A of nd-data / nd-mgmt rows).
+    for (const n of design?.nexus_dashboard?.nodes ?? []) out.ndIds.add(n.device_id)
     return out
-  }, [spines, leaves])
+  }, [spines, leaves, design])
 
   // ── Fork helpers ─────────────────────────────────────────────────────
   const isForked = file?.source === 'user'
@@ -520,7 +522,13 @@ export function LinksView({ requirements, projectPath, onGoToDesign }: LinksView
                               <span
                                 className={cn(
                                   'px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider chamfer-xs',
-                                  l.kind === 'vpc-peer-link' ? 'bg-[#B85450]/15 text-[#B85450]' : 'bg-muted text-muted-foreground'
+                                  l.kind === 'vpc-peer-link'
+                                    ? 'bg-[#B85450]/15 text-[#B85450]'
+                                    : l.kind === 'nd-data'
+                                      ? 'bg-[#2BB5C4]/15 text-[#1a8a96]'
+                                      : l.kind === 'nd-mgmt'
+                                        ? 'bg-muted text-muted-foreground border border-dashed border-muted-foreground/50'
+                                        : 'bg-muted text-muted-foreground'
                                 )}
                               >
                                 {cableKindLabel(l.kind)}
@@ -551,7 +559,7 @@ export function LinksView({ requirements, projectPath, onGoToDesign }: LinksView
                               <div className="flex items-center justify-end gap-1">
                                 <button
                                   className="opacity-70 hover:opacity-100 disabled:opacity-25 disabled:cursor-default"
-                                  disabled={l.kind === 'vpc-peer-link'}
+                                  disabled={l.kind === 'vpc-peer-link' || l.kind === 'nd-data' || l.kind === 'nd-mgmt'}
                                   onClick={() => {
                                     setEditing(l)
                                     setDialogOpen(true)
@@ -559,7 +567,9 @@ export function LinksView({ requirements, projectPath, onGoToDesign }: LinksView
                                   title={
                                     l.kind === 'vpc-peer-link'
                                       ? 'Peer-link ports come from the switch library and the vPC pairs card'
-                                      : 'Edit'
+                                      : l.kind === 'nd-data' || l.kind === 'nd-mgmt'
+                                        ? 'Nexus Dashboard links follow the Requirements card (media / optic via CSV)'
+                                        : 'Edit'
                                   }
                                 >
                                   <Pencil className="size-3.5" />
@@ -894,7 +904,7 @@ interface ImportCsvDialogProps {
   onOpenChange(open: boolean): void
   cableLinksFilePath: string
   existingLinks: CableLink[]
-  validDevices: { spineIds: Set<string>; leafIds: Set<string> }
+  validDevices: { spineIds: Set<string>; leafIds: Set<string>; ndIds?: Set<string> }
   onImport(links: CableLink[], mode: 'replace' | 'append'): Promise<void>
 }
 

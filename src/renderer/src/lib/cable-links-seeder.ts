@@ -6,7 +6,7 @@ import type { CableLink } from '@/schemas/cable-links'
 import type { LeafPair } from '@/schemas/leaf-pairs'
 import { expandPortTemplate } from './port-template'
 import { resolvePatchPanel } from './patch-panel-resolver'
-import { peerLinkGroupFor } from '@domain'
+import { ndSpecFor, OOB_MGMT_DEVICE_ID, OOB_MGMT_PORT, peerLinkGroupFor } from '@domain'
 import { switchToSpec } from './solver-bridge'
 
 // Auto-seed the fabric uplink wiring (leaf → spine only) from a fresh
@@ -457,6 +457,123 @@ export function seedCableLinks(input: SeedCableLinksInput): SeedCableLinksResult
           })
         }
       }
+    }
+  }
+
+  // ── Nexus Dashboard (Phase 17) ─────────────────────────────────────
+  // Per node: fabric0 → leaf A, fabric1 → leaf B of the attach pair (data,
+  // bond0 active-standby) and mgmt0/mgmt1 → the OOB tier's pair, or the
+  // `oob-mgmt` cloud endpoint when no tier is the OOB management network.
+  // Leaf-side ports are the first free host (primary-group) ports.
+  const nd = design.nexus_dashboard ?? null
+  if (nd && nd.nodes.length > 0) {
+    const leafById = new Map(leaves.map((l) => [l.device_id, l]))
+    const used = new Map<string, Set<string>>()
+    for (const l of links) {
+      for (const end of [l.device_a, l.device_b]) {
+        const bag = used.get(end.device_id) ?? new Set<string>()
+        bag.add(end.port)
+        used.set(end.device_id, bag)
+      }
+    }
+    const freeHostPorts = new Map<string, string[]>()
+    const nextHostPort = (leafId: string): string | null => {
+      let free = freeHostPorts.get(leafId)
+      if (!free) {
+        const leaf = leafById.get(leafId)
+        const sw = leaf ? switches.find((s) => s.id === leaf.model_id) : undefined
+        let all: string[] = []
+        try {
+          all = sw ? expandPortTemplate(sw.primary.naming_template) : []
+        } catch {
+          all = []
+        }
+        const taken = used.get(leafId) ?? new Set<string>()
+        free = all.filter((p) => !taken.has(p))
+        freeHostPorts.set(leafId, free)
+      }
+      return free.shift() ?? null
+    }
+    const ndRack = new Map<string, string | null>()
+    for (const rack of design.rack_layout) {
+      for (const d of rack.devices) if (d.role === 'nd') ndRack.set(d.device_id, rack.rack_name)
+    }
+    const speedNoted = new Set<string>()
+    const seedNdLink = (
+      kind: 'nd-data' | 'nd-mgmt',
+      node: (typeof nd.nodes)[number],
+      nodePort: string,
+      leafId: string,
+      speed_g: number,
+      note: string
+    ): void => {
+      const leaf = leafById.get(leafId)
+      if (!leaf) {
+        notes.push(`Nexus Dashboard: ${leafId} is not in the design — ${node.device_id}:${nodePort} not seeded.`)
+        return
+      }
+      const leafPort = nextHostPort(leafId)
+      if (!leafPort) {
+        notes.push(`Nexus Dashboard: ${leafId} has no free host port for ${node.device_id}:${nodePort}.`)
+        return
+      }
+      const sw = switches.find((s) => s.id === leaf.model_id)
+      if (sw && sw.primary.speed_g !== speed_g && !speedNoted.has(`${leaf.model_id}|${kind}`)) {
+        speedNoted.add(`${leaf.model_id}|${kind}`)
+        notes.push(
+          `Nexus Dashboard: ${kind === 'nd-data' ? 'data' : 'management'} links are ${speed_g}G but ${leaf.model_id} host ports are ${sw.primary.speed_g}G — check the port speed on the Nexus Dashboard card.`
+        )
+      }
+      linkSerial += 1
+      links.push({
+        id: `link-${linkSerial.toString().padStart(4, '0')}`,
+        kind,
+        device_a: { rack: ndRack.get(node.device_id) ?? null, device_id: node.device_id, port: nodePort },
+        device_b: { rack: leaf.rack, device_id: leaf.device_id, port: leafPort },
+        speed_g,
+        optic_id: null,
+        patch_panel_id: null,
+        label: `${node.device_id}:${nodePort} ↔ ${leaf.device_id}:${leafPort}`,
+        length_m: null,
+        notes: note
+      })
+    }
+
+    if (nd.data_leaf_ids.length === 0) {
+      notes.push('Nexus Dashboard: no leaves to attach the cluster to — data links not seeded.')
+    }
+    for (const node of nd.nodes) {
+      nd.data_ports.forEach((port, m) => {
+        const leafId = nd.data_leaf_ids[m] ?? nd.data_leaf_ids[0]
+        if (!leafId) return
+        seedNdLink('nd-data', node, port, leafId, nd.data_speed_g, 'Nexus Dashboard data (bond0, active-standby)')
+      })
+      nd.mgmt_ports.forEach((port, m) => {
+        if (nd.mgmt_leaf_ids && nd.mgmt_leaf_ids.length > 0) {
+          const leafId = nd.mgmt_leaf_ids[m] ?? nd.mgmt_leaf_ids[0]
+          seedNdLink('nd-mgmt', node, port, leafId, nd.mgmt_speed_g, 'Nexus Dashboard management (bond1, active-standby) → OOB tier')
+          return
+        }
+        linkSerial += 1
+        links.push({
+          id: `link-${linkSerial.toString().padStart(4, '0')}`,
+          kind: 'nd-mgmt',
+          device_a: { rack: ndRack.get(node.device_id) ?? null, device_id: node.device_id, port },
+          device_b: { rack: null, device_id: OOB_MGMT_DEVICE_ID, port: OOB_MGMT_PORT },
+          speed_g: nd.mgmt_speed_g,
+          optic_id: null,
+          patch_panel_id: null,
+          label: `${node.device_id}:${port} ↔ OOB management network`,
+          length_m: null,
+          notes: 'Nexus Dashboard management (bond1, active-standby) → OOB network outside this design'
+        })
+      })
+    }
+    if (!nd.mgmt_leaf_ids) {
+      const spec = ndSpecFor(nd.cluster_model_id)
+      notes.push(
+        `Nexus Dashboard ${spec?.cluster_model_id ?? nd.cluster_model_id}: no tier is marked "OOB management" — the ${nd.nodes.length * nd.mgmt_ports.length} management cables go to the OOB network cloud.`
+      )
     }
   }
 

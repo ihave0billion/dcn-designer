@@ -14,7 +14,7 @@ import type { TopologyGraph, TopologyNode, TopologyRole } from './topology-extra
 // A label that does not match the solver's auto pattern is treated as a
 // user-given hostname and kept verbatim.
 
-export const AUTO_LABEL_RE = /^(spine|leaf|ipn|server)\s*\d+(\s*\(.*\))?$/i
+export const AUTO_LABEL_RE = /^(spine|leaf|ipn|server|nd node|nd)\s*\d+(\s*\(.*\))?$/i
 
 const SMART_MODEL_RE = /SE1U|SMART/i
 
@@ -41,6 +41,11 @@ export function defaultHostname(
   modelId: string,
   smart = false
 ): string {
+  // Phase 17 — ND-NODE-G5S → g5s-nd1 (the generation suffix, like gx2a-spine1).
+  if (role === 'nd') {
+    const gen = modelId.trim().split('-').filter(Boolean).pop() ?? 'nd'
+    return `${gen.toLowerCase()}-nd${index}`
+  }
   return `${modelNickname(modelId, smart)}-${role}${index}`
 }
 
@@ -58,6 +63,7 @@ export function displayName(
 ): { label: string; source: 'user' | 'auto' } {
   const raw = (node.label ?? '').trim()
   const isAuto = raw === '' || raw === node.id || AUTO_LABEL_RE.test(raw)
+  if (node.role === 'oob') return { label: raw || node.id, source: 'auto' }
   if (!isAuto) return { label: raw, source: 'user' }
   if (node.model_id === 'unknown') return { label: raw || node.id, source: 'auto' }
   return {

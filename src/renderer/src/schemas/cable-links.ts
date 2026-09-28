@@ -21,7 +21,9 @@ export type CableEndpoint = z.infer<typeof CableEndpointSchema>
 // spine↔leaf uplinks. Peer-links are the vPC pair's leaf↔leaf cables;
 // 'server' is reserved for host wiring (not seeded — the topology draws
 // server symbols from the tier, not from links).
-export const CableLinkKindSchema = z.enum(['uplink', 'vpc-peer-link', 'server'])
+// Phase 17 — 'nd-data' (Nexus Dashboard node fabric0/1 → leaf) and
+// 'nd-mgmt' (node mgmt0/1 → OOB leaf, or the `oob-mgmt` cloud endpoint).
+export const CableLinkKindSchema = z.enum(['uplink', 'vpc-peer-link', 'server', 'nd-data', 'nd-mgmt'])
 export type CableLinkKind = z.infer<typeof CableLinkKindSchema>
 
 // v1.6.1 — cable media. Null/absent = the project default

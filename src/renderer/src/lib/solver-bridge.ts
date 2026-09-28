@@ -88,14 +88,25 @@ export function requirementsToSolverInput(req: RequirementsFile): SolverRequirem
       leaf_model_id: t.leaf_model_id,
       override_uplink_speed_g: t.override_uplink_speed_g,
       server_model_id: t.server_model_id ?? null,
-      vpc_pairs: t.vpc_pairs ?? true
+      vpc_pairs: t.vpc_pairs ?? true,
+      oob_management: t.oob_management ?? false
     })),
     racks: req.racks.map((r) => ({
       name: r.name,
       size_u: r.size_u,
       pdu_kw_budget: r.pdu_kw_budget
     })),
-    racks_per_row: req.racks_per_row ?? null
+    racks_per_row: req.racks_per_row ?? null,
+    // Phase 17 — Nexus Dashboard cluster (null cluster = none).
+    nexus_dashboard: req.nexus_dashboard?.cluster_model_id
+      ? {
+          cluster_model_id: req.nexus_dashboard.cluster_model_id,
+          node_count: req.nexus_dashboard.node_count,
+          data_speed_g: req.nexus_dashboard.data_speed_g,
+          mgmt_speed_g: req.nexus_dashboard.mgmt_speed_g,
+          attach_pair_id: req.nexus_dashboard.attach_pair_id
+        }
+      : null
   }
 }
 

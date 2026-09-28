@@ -134,6 +134,9 @@ export interface TierRequest {
   server_model_id?: string | null
   // Phase 14 — false = leaves of this tier are not vPC-paired at all.
   vpc_pairs?: boolean
+  // Phase 17 — this tier is the out-of-band management network: the Nexus
+  // Dashboard mgmt0/mgmt1 cables land on its first pair. Default false.
+  oob_management?: boolean
 }
 
 // Phase 14 — vPC leaf pairs. See renderer/schemas/project.ts FabricSchema
@@ -177,6 +180,41 @@ export interface SolverRequirements {
   // Phase 16 — physical rows: the rack inventory is read as consecutive
   // rows of this many racks; spines are spread one per row. null = no rows.
   racks_per_row?: number | null
+  // Phase 17 — optional Nexus Dashboard physical cluster.
+  nexus_dashboard?: NexusDashboardRequest | null
+}
+
+// Phase 17 — what the Requirements tab's Nexus Dashboard card asks for.
+export interface NexusDashboardRequest {
+  /** 'ND-CLUSTER-G5S' | 'ND-CLUSTER-G5L'; null = no cluster. */
+  cluster_model_id: string | null
+  /** 1 or 3 (default 3). */
+  node_count?: number
+  /** 10 / 25 / 50 (default 25). */
+  data_speed_g?: number
+  /** 1 / 10 (default 10). */
+  mgmt_speed_g?: number
+  /** Leaf pair (vpc pair id) the data links attach to; null = first pair of the first data tier. */
+  attach_pair_id?: string | null
+}
+
+// Phase 17 — the solved cluster: node devices (racked as role 'nd') and the
+// leaves its cables land on. `mgmt_leaf_ids` is null when no tier is the OOB
+// management network — the topology then draws a cloud.
+export interface NexusDashboardResult {
+  cluster_model_id: string
+  node_model_id: string
+  node_count: number
+  ru_per_node: number
+  data_speed_g: number
+  mgmt_speed_g: number
+  data_ports: string[]
+  mgmt_ports: string[]
+  /** [leaf A, leaf B] — fabric0 → A, fabric1 → B (same leaf twice when unpaired). */
+  data_leaf_ids: string[]
+  attach_pair_id: string | null
+  mgmt_leaf_ids: string[] | null
+  nodes: Array<{ device_id: string; model_id: string; label: string; ru: number }>
 }
 
 export interface SolverContext {
@@ -212,6 +250,8 @@ export interface TierResult {
   server_model_id?: string | null
   // Phase 14 — pass-through of TierRequest.vpc_pairs (default true).
   vpc_pairs?: boolean
+  // Phase 17 — pass-through of TierRequest.oob_management (default false).
+  oob_management?: boolean
 }
 
 export interface SpineResult {
@@ -252,7 +292,7 @@ export interface OpticsBomEntry {
 export interface RackDevicePlacement {
   device_id: string // e.g. "leaf-1", "spine-2", "server-3", "ipn-1"
   model_id: string
-  role: 'spine' | 'leaf' | 'server' | 'ipn'
+  role: 'spine' | 'leaf' | 'server' | 'ipn' | 'nd'
   start_u: number
   ru: number
   label: string
@@ -299,6 +339,10 @@ export type WarningCode =
   | 'VPC_PEER_LINK_RESERVED'
   | 'VPC_UPLINKS_REDUCED'
   | 'VPC_ODD_LEAF'
+  // Phase 17 — Nexus Dashboard
+  | 'ND_ATTACH_PAIR_NOT_FOUND'
+  | 'ND_NO_LEAVES'
+  | 'ND_NO_OOB_LEAVES'
 
 export interface SolverWarning {
   code: WarningCode
@@ -427,4 +471,6 @@ export interface DesignResult {
   committed_candidate_id: CandidateId
   // Phase 14 — optional so design.yaml files written before v1.4 still parse.
   vpc?: VpcSummary
+  // Phase 17 — the Nexus Dashboard cluster, null/absent when none is selected.
+  nexus_dashboard?: NexusDashboardResult | null
 }

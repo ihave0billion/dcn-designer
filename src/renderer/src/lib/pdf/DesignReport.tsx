@@ -1,7 +1,7 @@
-import { Document, Page, View, Text, Image, Svg, Rect, Line, Path, type DocumentProps } from '@react-pdf/renderer'
+import { Document, Page, View, Text, Image, Svg, Rect, Line, Path, Ellipse, type DocumentProps } from '@react-pdf/renderer'
 import type { ReactElement } from 'react'
 import type { DesignResult, OpticsBomScenario, SolverWarning } from '@domain'
-import { DEFAULT_SWITCH_POWER_W } from '@domain'
+import { DEFAULT_SWITCH_POWER_W, ndSpecFor } from '@domain'
 import type { RequirementsFile } from '@/schemas/project'
 import { FABRIC_MODE_LABEL } from '@/schemas/project'
 import type { CableLink } from '@/schemas/cable-links'
@@ -260,6 +260,12 @@ function DesignSummaryPage({
           }
         />
         <Def label="IPN routers" value={fmt(committed?.total_ipn_routers ?? 0)} />
+        {design.nexus_dashboard ? (
+          <Def
+            label="Nexus Dashboard"
+            value={`${t(design.nexus_dashboard.cluster_model_id)} (${fmt(design.nexus_dashboard.node_count)} × ${t(design.nexus_dashboard.node_model_id)})`}
+          />
+        ) : null}
         <Def label="Host bandwidth" value={`${fmt(s.total_host_bw_g)} G`} />
         <Def label="Uplink bandwidth" value={`${fmt(s.total_uplink_bw_g)} G`} />
         {design.spine ? (
@@ -465,6 +471,15 @@ export function BomPage({
             </View>
           </View>
         )}
+        {deviceBom.nd_cluster ? (
+          <Text style={styles.note}>
+            Nexus Dashboard: the {fmt(deviceBom.nd_cluster.node_count)} × {t(deviceBom.nd_cluster.node_model_id)} nodes are ordered as one{' '}
+            {t(deviceBom.nd_cluster.cluster_model_id)} cluster PID
+            {design.nexus_dashboard?.mgmt_leaf_ids
+              ? '; management links land on the OOB tier.'
+              : '; management links go to an OOB network outside this design.'}
+          </Text>
+        ) : null}
         {deviceBom.has_unknown_models ? (
           <Text style={styles.note}>
             * Model not found in the switch library — power is excluded from the total.
@@ -631,8 +646,12 @@ const ROLE_COLOR: Record<string, string> = {
   spine: COLORS.spine,
   leaf: COLORS.leaf,
   ipn: COLORS.ipn,
-  server: COLORS.muted
+  server: COLORS.muted,
+  nd: COLORS.nd,
+  oob: COLORS.oob
 }
+// Phase 17 — Nexus Dashboard bracket / link colour on the topology page.
+const ND_COLOR = COLORS.nd
 
 function RackDiagram({ rack }: { rack: DesignResult['rack_layout'][number] }): ReactElement {
   const height = rack.size_u * U_H
@@ -718,12 +737,14 @@ function RackPage({
       ) : (
         <>
           <View style={styles.legend}>
-            {(['spine', 'ipn', 'leaf', 'server'] as const).map((role) => (
-              <View style={styles.legendItem} key={role}>
-                <View style={[styles.legendSwatch, { backgroundColor: ROLE_COLOR[role] }]} />
-                <Text style={styles.legendLabel}>{role}</Text>
-              </View>
-            ))}
+            {(['spine', 'ipn', 'leaf', 'server', 'nd'] as const)
+              .filter((role) => role !== 'nd' || design.rack_layout.some((r) => r.devices.some((d) => d.role === 'nd')))
+              .map((role) => (
+                <View style={styles.legendItem} key={role}>
+                  <View style={[styles.legendSwatch, { backgroundColor: ROLE_COLOR[role] }]} />
+                  <Text style={styles.legendLabel}>{role === 'nd' ? 'Nexus Dashboard node' : role}</Text>
+                </View>
+              ))}
           </View>
           {groups.map((g, gi) => (
             <View key={gi}>
@@ -898,11 +919,24 @@ function TopologyPage({
                   width={p.w}
                   height={p.h}
                   fill="none"
-                  stroke={PEER_LINK_COLOR}
+                  stroke={p.kind === 'nd' ? ND_COLOR : PEER_LINK_COLOR}
                   strokeWidth={Math.max(0.6, 0.6 / scale)}
                   strokeDasharray="3 2"
                 />
               ))}
+              {showLabels &&
+                page.pairs
+                  .filter((p) => p.kind === 'nd')
+                  .map((p) => (
+                    <Text
+                      key={`pair-${p.id}-label`}
+                      x={p.x + 3}
+                      y={p.y - 2}
+                      style={{ fontSize: fontPx * 0.85, fontFamily: 'Helvetica-Bold', fill: ND_COLOR }}
+                    >
+                      {pdfText(p.label)}
+                    </Text>
+                  ))}
               {page.edges.map((e) =>
                 e.kind === 'vpc-peer-link' ? (
                   // Phase 15 — port-channel symbol: member cables as parallel
@@ -916,14 +950,27 @@ function TopologyPage({
                     y1={e.y1}
                     x2={e.x2}
                     y2={e.y2}
-                    stroke={COLORS.faint}
-                    strokeWidth={e.kind === 'server' ? Math.max(0.4, 0.35 / scale) : Math.max(0.6, 0.5 / scale)}
+                    stroke={e.kind === 'nd-data' ? ND_COLOR : COLORS.faint}
+                    strokeWidth={e.kind === 'server' || e.kind === 'nd-mgmt' ? Math.max(0.4, 0.35 / scale) : Math.max(0.6, 0.5 / scale)}
                     strokeDasharray={e.dashed ? '4 3' : undefined}
                   />
                 )
               )}
               {page.nodes.map((n) =>
-                n.image ? null : (
+                n.image ? null : n.kind === 'cloud' ? (
+                  // Phase 17 — the OOB-management network outside the design.
+                  <Ellipse
+                    key={n.id}
+                    cx={n.x + n.w / 2}
+                    cy={n.y + n.h / 2}
+                    rx={n.w / 2}
+                    ry={n.h / 2}
+                    fill={ROLE_COLOR.oob}
+                    stroke={COLORS.muted}
+                    strokeWidth={Math.max(0.6, 0.6 / scale)}
+                    strokeDasharray="3 2"
+                  />
+                ) : (
                   <Rect
                     key={n.id}
                     x={n.x}
@@ -966,16 +1013,22 @@ function TopologyPage({
             )}
           </View>
           <View style={styles.legend}>
-            {(['spine', 'ipn', 'leaf', 'server'] as const)
-              .filter((role) => role !== 'server' || page.counts.server > 0)
+            {(['spine', 'ipn', 'leaf', 'server', 'nd', 'oob'] as const)
+              .filter((role) => (role !== 'server' && role !== 'nd' && role !== 'oob') || page.counts[role] > 0)
               .map((role) => (
                 <View style={styles.legendItem} key={role}>
                   <View style={[styles.legendSwatch, { backgroundColor: ROLE_COLOR[role] }]} />
                   <Text style={styles.legendLabel}>
-                    {role} ({page.counts[role]})
+                    {role === 'nd' ? 'Nexus Dashboard node' : role === 'oob' ? 'OOB management network (outside the design)' : role} ({page.counts[role]})
                   </Text>
                 </View>
               ))}
+            {page.counts.nd > 0 ? (
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: ND_COLOR }]} />
+                <Text style={styles.legendLabel}>ND data link (fabric0/1, active-standby); dashed = ND management (mgmt0/1)</Text>
+              </View>
+            ) : null}
             {page.peerLinks > 0 ? (
               <View style={styles.legendItem}>
                 <View style={[styles.legendSwatch, { backgroundColor: PEER_LINK_COLOR }]} />
@@ -1103,7 +1156,7 @@ export function DesignReport({
     showServers: showServers ?? topologyLayout?.show_servers ?? false,
     serverInfo,
     images: panelImages,
-    ruOf: (id) => ruById.get(id) ?? null
+    ruOf: (id) => ruById.get(id) ?? ndSpecFor(id)?.ru ?? null
   })
 
   return (

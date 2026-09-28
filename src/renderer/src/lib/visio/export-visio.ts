@@ -7,6 +7,7 @@ import { buildScene, type Fabric, type Orientation } from '@/lib/topology-hierar
 import { resolveScenePositions } from '@/lib/topology-scene-positions'
 import type { ServerInfoResolver } from '@/lib/server-symbols'
 import { MasterStore } from './master-store'
+import { ndSpecFor } from '@domain'
 import { resolveModel, type ModelResolution } from './resolve-model'
 import { Diagram } from './vsdx-writer'
 import {
@@ -132,7 +133,7 @@ export async function exportTopologyVisio(
       resolutions.set(modelId, r)
       // Servers report their own fallback below (generic box, not a schematic
       // switch panel); the generic "server" symbol is not a substitution at all.
-      if (!serverIds.has(modelId) && modelId !== 'server') note(r.note)
+      if (!serverIds.has(modelId) && modelId !== 'server' && !ndSpecFor(modelId)) note(r.note)
     }
     let panel: ResolvedPanel
     if (r.kind === 'master' && store) {
@@ -146,6 +147,9 @@ export async function exportTopologyVisio(
       // Phase 14 — no UCS master for this server model: generic box, reported.
       panel = { kind: 'server-box', modelId: modelId === 'server' ? 'Servers' : modelId, ru: info?.ru ?? 1 }
       if (modelId !== 'server') note(`${modelId}: no UCS stencil master; drawn as a generic server box`)
+    } else if (ndSpecFor(modelId)) {
+      // Phase 17 — a Nexus Dashboard node: the generic box in teal (no ND master in the packs).
+      panel = { kind: 'server-box', modelId, ru: ndSpecFor(modelId)!.ru }
     } else {
       panel = {
         kind: 'schematic',
@@ -184,11 +188,12 @@ export async function exportTopologyVisio(
       nodes.push({
         id: n.id,
         label: n.label,
-        sublabel: n.sublabel,
+        sublabel: n.kind === 'cloud' ? null : n.sublabel,
         role: n.kind === 'server' ? 'server' : n.role,
         x: p.x,
         y: p.y,
-        panel: await panelFor(modelId),
+        // Phase 17 — the OOB cloud has no model; it is drawn as an ellipse.
+        panel: n.kind === 'cloud' ? { kind: 'cloud' } : await panelFor(modelId),
         smart: !!n.device?.smart,
         modelId
       })
@@ -211,7 +216,7 @@ export async function exportTopologyVisio(
       subtitle: custom ? 'Positions: Topology tab (user layout)' : 'Positions: Topology tab (auto layout)',
       nodes,
       edges,
-      pairs: scene.pairs.filter((p) => p.bracket).map((p) => ({ id: p.id, memberIds: p.memberIds, label: p.label })),
+      pairs: scene.pairs.filter((p) => p.bracket).map((p) => ({ id: p.id, kind: p.kind, memberIds: p.memberIds, label: p.label })),
       orientation
     })
   }

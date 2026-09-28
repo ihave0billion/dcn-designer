@@ -23,7 +23,10 @@ export const COLORS = {
   ok: '#15702f',
   spine: '#1f4e79',
   leaf: '#2f6f4f',
-  ipn: '#8a5a00'
+  ipn: '#8a5a00',
+  // Phase 17 — Nexus Dashboard nodes (teal) and the OOB cloud (muted fill).
+  nd: '#0f6f7a',
+  oob: '#e9e9ec'
 } as const
 
 export const PAGE_MARGIN = 36

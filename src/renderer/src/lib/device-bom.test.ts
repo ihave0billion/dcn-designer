@@ -150,6 +150,7 @@ describe('buildDeviceBom', () => {
     const bom = buildDeviceBom(design([]), SWITCHES)
     expect(bom).toEqual({
       rows: [],
+      nd_cluster: null,
       total_devices: 0,
       total_ru: 0,
       total_power_w: 0,

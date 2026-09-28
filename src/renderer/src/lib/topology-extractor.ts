@@ -1,6 +1,7 @@
 import type { DesignResult } from '@domain'
 import type { CableLink, CableLinkKind } from '@/schemas/cable-links'
 import type { LeafPair } from '@/schemas/leaf-pairs'
+import { OOB_MGMT_DEVICE_ID, OOB_MGMT_LABEL } from '@domain'
 
 // Phase 7 topology data extractor.
 //
@@ -18,7 +19,9 @@ import type { LeafPair } from '@/schemas/leaf-pairs'
 // edge has somewhere to attach (and a count of orphans is returned for
 // drift-detection later — see JOURNAL "Solver-regen drift detection").
 
-export type TopologyRole = 'spine' | 'leaf' | 'ipn'
+// Phase 17 — 'nd' = a Nexus Dashboard node; 'oob' = the OOB-management cloud
+// (the reserved `oob-mgmt` cable endpoint when no tier is the OOB network).
+export type TopologyRole = 'spine' | 'leaf' | 'ipn' | 'nd' | 'oob'
 
 export interface TopologyNode {
   id: string // matches device_id from rack_layout / cable_links
@@ -62,6 +65,8 @@ export interface TopologyEdge {
 export interface TopologyGraph {
   nodes: TopologyNode[]
   edges: TopologyEdge[]
+  // Phase 17 — the solved Nexus Dashboard cluster (labels the cluster bracket).
+  nexusDashboard?: DesignResult['nexus_dashboard']
   // Phase 14 — the vPC pairs in effect (leaf_pairs.yaml, else the solver's).
   pairs?: LeafPair[]
   // device_ids referenced by cable_links.yaml but absent from
@@ -88,13 +93,15 @@ function collectDevicesFromLayout(design: DesignResult): {
   ipns: Array<{ id: string } & DeviceMeta>
   spines: Array<{ id: string } & DeviceMeta>
   leaves: Array<{ id: string } & DeviceMeta>
+  nds: Array<{ id: string } & DeviceMeta>
 } {
   const ipns: Array<{ id: string } & DeviceMeta> = []
   const spines: Array<{ id: string } & DeviceMeta> = []
   const leaves: Array<{ id: string } & DeviceMeta> = []
+  const nds: Array<{ id: string } & DeviceMeta> = []
   for (const rack of design.rack_layout) {
     for (const d of rack.devices) {
-      if (d.role !== 'spine' && d.role !== 'leaf' && d.role !== 'ipn') continue
+      if (d.role !== 'spine' && d.role !== 'leaf' && d.role !== 'ipn' && d.role !== 'nd') continue
       const entry = {
         id: d.device_id,
         role: d.role as TopologyRole,
@@ -107,10 +114,11 @@ function collectDevicesFromLayout(design: DesignResult): {
       } satisfies { id: string } & DeviceMeta
       if (d.role === 'ipn') ipns.push(entry)
       else if (d.role === 'spine') spines.push(entry)
+      else if (d.role === 'nd') nds.push(entry)
       else leaves.push(entry)
     }
   }
-  return { ipns, spines, leaves }
+  return { ipns, spines, leaves, nds }
 }
 
 // Fallback: when rack_layout is empty (no racks defined yet), synthesise
@@ -120,9 +128,11 @@ function collectDevicesFromLayout(design: DesignResult): {
 function synthesiseDevicesFromSummary(design: DesignResult): {
   spines: Array<{ id: string } & DeviceMeta>
   leaves: Array<{ id: string } & DeviceMeta>
+  nds: Array<{ id: string } & DeviceMeta>
 } {
   const spines: Array<{ id: string } & DeviceMeta> = []
   const leaves: Array<{ id: string } & DeviceMeta> = []
+  const nds: Array<{ id: string } & DeviceMeta> = []
   if (design.spine) {
     for (let i = 0; i < design.spine.spines_needed; i++) {
       spines.push({
@@ -154,7 +164,10 @@ function synthesiseDevicesFromSummary(design: DesignResult): {
       })
     }
   }
-  return { spines, leaves }
+  for (const n of design.nexus_dashboard?.nodes ?? []) {
+    nds.push({ id: n.device_id, role: 'nd', model_id: n.model_id, rack: null, label: n.label, ru: n.ru, power_w: null, pod_index: null })
+  }
+  return { spines, leaves, nds }
 }
 
 export function extractTopology(
@@ -166,9 +179,9 @@ export function extractTopology(
   const leafPairs: LeafPair[] = pairs ?? design.vpc?.pairs ?? []
   const pairOfLeaf = new Map<string, LeafPair>()
   for (const p of leafPairs) for (const m of p.members) pairOfLeaf.set(m, p)
-  let { ipns, spines, leaves } = collectDevicesFromLayout(design)
+  let { ipns, spines, leaves, nds } = collectDevicesFromLayout(design)
   if (spines.length === 0 && leaves.length === 0) {
-    ;({ spines, leaves } = synthesiseDevicesFromSummary(design))
+    ;({ spines, leaves, nds } = synthesiseDevicesFromSummary(design))
     ipns = []
   }
 
@@ -176,6 +189,14 @@ export function extractTopology(
   for (const ip of ipns) meta.set(ip.id, ip)
   for (const s of spines) meta.set(s.id, s)
   for (const l of leaves) meta.set(l.id, l)
+  for (const n of nds) meta.set(n.id, n)
+  // Phase 17 — the OOB-management cloud is a reserved endpoint, not an orphan.
+  const oobs: Array<{ id: string } & DeviceMeta> = []
+  if (cableLinks.some((l) => l.device_a.device_id === OOB_MGMT_DEVICE_ID || l.device_b.device_id === OOB_MGMT_DEVICE_ID)) {
+    const cloud = { id: OOB_MGMT_DEVICE_ID, role: 'oob' as const, model_id: OOB_MGMT_DEVICE_ID, rack: null, label: OOB_MGMT_LABEL, ru: null, power_w: null, pod_index: null }
+    oobs.push(cloud)
+    meta.set(cloud.id, cloud)
+  }
 
   // Walk cable_links to compute the per-device used-port set + collect
   // orphan device ids (referenced but not in the rack_layout).
@@ -245,7 +266,9 @@ export function extractTopology(
   const nodes: TopologyNode[] = [
     ...ipns.map(buildNode),
     ...spines.map(buildNode),
-    ...leaves.map(buildNode)
+    ...leaves.map(buildNode),
+    ...nds.map(buildNode),
+    ...oobs.map(buildNode)
   ]
 
   // Edges: source = spine end if either end is a spine; otherwise just
@@ -275,7 +298,7 @@ export function extractTopology(
     }
   })
 
-  return { nodes, edges, pairs: leafPairs, orphanDeviceIds: [...orphans] }
+  return { nodes, edges, pairs: leafPairs, nexusDashboard: design.nexus_dashboard ?? null, orphanDeviceIds: [...orphans] }
 }
 
 // Sort port names like "Eth1/1", "Eth1/2", ..., "Eth1/49/1", "Eth1/49/2"

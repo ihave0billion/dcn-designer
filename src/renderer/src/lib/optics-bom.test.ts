@@ -70,7 +70,7 @@ describe('buildOpticsBom', () => {
       switches: SWITCHES
     })
     expect(bom.total_transceivers).toBe(4)
-    expect(bom.by_side).toEqual({ spine: 2, leaf: 2, peer_link: 0, other: 0 })
+    expect(bom.by_side).toEqual({ spine: 2, leaf: 2, peer_link: 0, nd: 0, other: 0 })
     expect(bom.ends_without_pid).toBe(4)
     expect(bom.rows.map((r) => [r.side, r.model_id, r.count, r.optic_id, r.optic_hint])).toEqual([
       ['spine', 'N9K-C9364D-GX2A', 2, null, 'QSFP-DD'],

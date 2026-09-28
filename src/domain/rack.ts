@@ -1,4 +1,5 @@
 import type {
+  NexusDashboardResult,
   RackInventoryEntry,
   RackPlacement,
   SolverWarning,
@@ -6,6 +7,7 @@ import type {
   SwitchSpec,
   TierResult
 } from './types'
+import { ND_NODE_POWER_W, rackOfDevice } from './nexus-dashboard'
 
 // Defaults used when the library doesn't specify (N9K.md doesn't carry
 // ru / power_w for many models). Conservative-ish numbers; the user can
@@ -19,7 +21,7 @@ export const DEFAULT_SWITCH_POWER_W = 800
 interface PendingDevice {
   device_id: string
   model_id: string
-  role: 'spine' | 'leaf' | 'server'
+  role: 'spine' | 'leaf' | 'server' | 'nd'
   ru: number
   power_w: number
   label: string
@@ -86,11 +88,13 @@ export const LOGICAL_FABRIC_RACK_NAME = 'Fabric (unracked)'
 export function synthesizeLogicalLayout(
   spine: SpineResult | null,
   tiers: TierResult[],
-  switches: SwitchSpec[]
+  switches: SwitchSpec[],
+  // Phase 17 — the Nexus Dashboard nodes, after the leaves.
+  nd: NexusDashboardResult | null = null
 ): RackPlacement[] {
   const devices: RackPlacement['devices'] = []
   let cursor_u = 0
-  const push = (d: { device_id: string; model_id: string; role: 'spine' | 'leaf'; ru: number; label: string }): void => {
+  const push = (d: { device_id: string; model_id: string; role: 'spine' | 'leaf' | 'nd'; ru: number; label: string }): void => {
     devices.push({ ...d, start_u: cursor_u + 1, pod_index: null })
     cursor_u += d.ru
   }
@@ -128,6 +132,10 @@ export function synthesizeLogicalLayout(
     const sw = switches.find((s) => s.id === d.model_id)
     est_power_w += powerW(sw)
   }
+  for (const n of nd?.nodes ?? []) {
+    push({ device_id: n.device_id, model_id: n.model_id, role: 'nd', ru: n.ru, label: n.label })
+    est_power_w += ND_NODE_POWER_W
+  }
 
   if (devices.length === 0) return []
   return [
@@ -147,7 +155,10 @@ export function placeRacks(
   tiers: TierResult[],
   switches: SwitchSpec[],
   rack_inventory: RackInventoryEntry[],
-  racks_per_row: number | null = null
+  racks_per_row: number | null = null,
+  // Phase 17 — Nexus Dashboard nodes: racked with the leaf their data links
+  // attach to (first leaf of the attach pair), else wherever there is room.
+  nd: NexusDashboardResult | null = null
 ): RackPlacementResult {
   const warnings: SolverWarning[] = []
 
@@ -316,6 +327,38 @@ export function placeRacks(
             context: { device_id: m.device_id, model_id: m.model_id }
           })
         }
+      }
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // Phase 17 — Nexus Dashboard nodes, after the leaves so they sit under
+  // the switches of their rack.
+  // ──────────────────────────────────────────────────────────────────
+  if (nd) {
+    const preferred = nd.data_leaf_ids.length ? rackOfDevice(layout, nd.data_leaf_ids[0]) : null
+    for (const n of nd.nodes) {
+      const dev: PendingDevice = {
+        device_id: n.device_id,
+        model_id: n.model_id,
+        role: 'nd',
+        ru: n.ru,
+        power_w: ND_NODE_POWER_W,
+        label: n.label,
+        pod_index: null
+      }
+      let placed = preferred ? pushDevice(preferred, dev) : false
+      for (const rack of layout) {
+        if (placed) break
+        placed = pushDevice(rack, dev)
+      }
+      if (!placed) {
+        warnings.push({
+          code: 'RACK_INSUFFICIENT_SPACE',
+          severity: 'error',
+          message: `Could not place ${dev.label} — racks are full or over PDU budget.`,
+          context: { device_id: dev.device_id, model_id: dev.model_id }
+        })
       }
     }
   }

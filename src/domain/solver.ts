@@ -4,7 +4,8 @@ import { checkUseCaseConstraints } from './use-case'
 import { placeRacks, synthesizeLogicalLayout } from './rack'
 import { buildCandidates, IPN_RACK_NAME } from './multipod'
 import { pickIpnRouter } from './ipn'
-import { effectiveVpcSettings, pairLeaves, uplinkBudgetAfterPeerLink } from './vpc'
+import { effectiveVpcSettings, pairLeaves, pairLeavesFromTiers, uplinkBudgetAfterPeerLink } from './vpc'
+import { planNexusDashboard } from './nexus-dashboard'
 import type {
   DesignResult,
   DesignSummary,
@@ -157,12 +158,22 @@ export function solve(
   // append a duplicate IPN rack on a subsequent Generate.
   // ──────────────────────────────────────────────────────────────────
   const deviceRacks = (requirements.racks ?? []).filter((r) => r.name !== IPN_RACK_NAME)
+  // Phase 17 — plan the Nexus Dashboard cluster before placement: its nodes
+  // rack next to the leaf pair they attach to (pair ids follow the leaf
+  // numbering, so the tier-derived pairing matches placeRacks' ids).
+  const ndPlan = planNexusDashboard({
+    request: requirements.nexus_dashboard ?? null,
+    tiers: tierResults,
+    pairs: pairLeavesFromTiers(tierResults).pairs
+  })
+  warnings.push(...ndPlan.warnings)
   const rackResult = placeRacks(
     spineComp.spine,
     tierResults,
     context.switches,
     deviceRacks,
-    requirements.racks_per_row ?? null
+    requirements.racks_per_row ?? null,
+    ndPlan.result
   )
   warnings.push(...rackResult.warnings)
 
@@ -175,7 +186,7 @@ export function solve(
   const pairing = pairLeaves(
     rackResult.layout.length > 0
       ? rackResult.layout
-      : synthesizeLogicalLayout(spineComp.spine, tierResults, context.switches),
+      : synthesizeLogicalLayout(spineComp.spine, tierResults, context.switches, ndPlan.result),
     noVpcModels
   )
   warnings.push(...pairing.warnings)
@@ -190,7 +201,7 @@ export function solve(
     unpaired: pairing.unpaired,
     excluded: (rackResult.layout.length > 0
       ? rackResult.layout
-      : synthesizeLogicalLayout(spineComp.spine, tierResults, context.switches)
+      : synthesizeLogicalLayout(spineComp.spine, tierResults, context.switches, ndPlan.result)
     )
       .flatMap((r) => r.devices)
       .filter((d) => d.role === 'leaf' && noVpcModels.has(d.model_id))
@@ -253,6 +264,7 @@ export function solve(
     switches: context.switches,
     rack_inventory: deviceRacks,
     racks_per_row: requirements.racks_per_row ?? null,
+    nexus_dashboard: ndPlan.result,
     base_warnings
   })
   warnings.push(...candidatesOut.fabric_warnings)
@@ -274,7 +286,8 @@ export function solve(
     candidates: candidatesOut.candidates,
     primary_candidate_id: candidatesOut.primary_candidate_id,
     committed_candidate_id: candidatesOut.primary_candidate_id,
-    vpc
+    vpc,
+    nexus_dashboard: ndPlan.result
   }
 }
 

@@ -1,4 +1,5 @@
 import { CableLinkKindSchema, type CableLink, CableLinkMediaSchema } from '@/schemas/cable-links'
+import { OOB_MGMT_DEVICE_ID } from '@domain'
 
 // Fixed-schema CSV round-trip for cable_links.yaml. The columns below
 // are what `Export CSV` writes and what `Import CSV` expects. Unknown
@@ -40,6 +41,8 @@ export interface CsvParseResult {
 interface ValidDevices {
   spineIds: Set<string>
   leafIds: Set<string>
+  // Phase 17 — Nexus Dashboard node ids (device A of nd-data / nd-mgmt rows).
+  ndIds?: Set<string>
 }
 
 function escapeCsv(value: string): string {
@@ -186,13 +189,20 @@ export function parseCableLinksCsv(
       continue
     }
     const kind = kindParsed.data
-    const aOk = kind === 'vpc-peer-link' ? valid.leafIds.has(spineDeviceId) : valid.spineIds.has(spineDeviceId)
+    const isNd = kind === 'nd-data' || kind === 'nd-mgmt'
+    const aOk =
+      kind === 'vpc-peer-link'
+        ? valid.leafIds.has(spineDeviceId)
+        : isNd
+          ? (valid.ndIds?.has(spineDeviceId) ?? false)
+          : valid.spineIds.has(spineDeviceId)
     if (!aOk) {
       result.rows_skipped_unknown_device += 1
-      result.warnings.push(`Row ${r + 1}: unknown spine device "${spineDeviceId}" — skipped.`)
+      result.warnings.push(`Row ${r + 1}: unknown ${isNd ? 'Nexus Dashboard node' : 'spine device'} "${spineDeviceId}" — skipped.`)
       continue
     }
-    if (!valid.leafIds.has(leafDeviceId)) {
+    const bOk = valid.leafIds.has(leafDeviceId) || (kind === 'nd-mgmt' && leafDeviceId === OOB_MGMT_DEVICE_ID)
+    if (!bOk) {
       result.rows_skipped_unknown_device += 1
       result.warnings.push(`Row ${r + 1}: unknown leaf device "${leafDeviceId}" — skipped.`)
       continue

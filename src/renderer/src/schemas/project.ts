@@ -57,7 +57,11 @@ export const TierRowSchema = z.object({
   // Phase 14 — false = this tier's leaves are never vPC-paired (no
   // peer-link, no reservation, single-attached hosts). Decision 2026-09-28:
   // the SITE-A's FX3 management tier is not vPC'd.
-  vpc_pairs: z.boolean().default(true)
+  vpc_pairs: z.boolean().default(true),
+  // Phase 17 — this tier is the out-of-band management network: the Nexus
+  // Dashboard mgmt0/mgmt1 cables land on its first pair. No tier ticked =
+  // the management links go to an "OOB management network" cloud.
+  oob_management: z.boolean().default(false)
 })
 export type TierRow = z.infer<typeof TierRowSchema>
 
@@ -103,6 +107,33 @@ export const FabricSchema = z.object({
   ipn_router_model_id: z.string().nullable().default(null)
 })
 export type Fabric = z.infer<typeof FabricSchema>
+
+// ────────────────────────────────────────────────────────────────────
+// Phase 17 — Nexus Dashboard physical cluster (Requirements card).
+// The cluster PIDs are a code catalogue (`@domain` ND_CLUSTERS), not a
+// library file. null cluster = no ND in the design.
+// ────────────────────────────────────────────────────────────────────
+export const NdClusterModelIdSchema = z.enum(['ND-CLUSTER-G5S', 'ND-CLUSTER-G5L'])
+export const NexusDashboardSchema = z.object({
+  cluster_model_id: NdClusterModelIdSchema.nullable().default(null),
+  // 3 (the cluster PID) or 1 (single-node cluster).
+  node_count: z.number().int().min(1).max(3).default(3),
+  // fabric0 / fabric1 to the leaf pair: the VIC does 10 / 25 / 50G.
+  data_speed_g: z.union([z.literal(10), z.literal(25), z.literal(50)]).default(25),
+  // mgmt0 / mgmt1: 1G or 10G, both the same.
+  mgmt_speed_g: z.union([z.literal(1), z.literal(10)]).default(10),
+  // Leaf pair (leaf_pairs.yaml / design.vpc id) the data links attach to;
+  // null = the first pair of the first data (non-OOB) tier.
+  attach_pair_id: z.string().nullable().default(null)
+})
+export type NexusDashboard = z.infer<typeof NexusDashboardSchema>
+export const EMPTY_NEXUS_DASHBOARD: NexusDashboard = {
+  cluster_model_id: null,
+  node_count: 3,
+  data_speed_g: 25,
+  mgmt_speed_g: 10,
+  attach_pair_id: null
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Constraints
@@ -174,6 +205,8 @@ export const RequirementsFileSchema = z.object({
   // v1.6.1 — media for every cable that carries no per-link override.
   // Multimode fiber by default (user decision 2026-09-28: never DAC).
   default_cable_media: CableLinkMediaSchema.default('mmf'),
+  // Phase 17 — optional Nexus Dashboard cluster; absent in older files.
+  nexus_dashboard: NexusDashboardSchema.default(EMPTY_NEXUS_DASHBOARD),
   target_oversub_informational: z.number().positive().nullable().default(null)
 })
 export type RequirementsFile = z.infer<typeof RequirementsFileSchema>
@@ -215,6 +248,7 @@ export function emptyRequirements(project: ProjectMeta): RequirementsFile {
     racks_per_row: null,
     cable_tray_m: null,
     default_cable_media: 'mmf',
+    nexus_dashboard: { ...EMPTY_NEXUS_DASHBOARD },
     target_oversub_informational: null
   }
 }

@@ -180,7 +180,8 @@ export const REQUIREMENTS: RequirementsFile = {
       leaf_model_id: 'N9K-C93600CD-GX',
       override_uplink_speed_g: null,
       server_model_id: null,
-      vpc_pairs: true
+      vpc_pairs: true,
+      oob_management: false
     }
   ],
   fabric: {
@@ -205,6 +206,7 @@ export const REQUIREMENTS: RequirementsFile = {
   racks_per_row: null,
   cable_tray_m: 10,
   default_cable_media: 'mmf',
+  nexus_dashboard: { cluster_model_id: null, node_count: 3, data_speed_g: 25, mgmt_speed_g: 10, attach_pair_id: null },
   target_oversub_informational: 3
 }
 

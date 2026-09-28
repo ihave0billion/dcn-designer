@@ -58,11 +58,15 @@ export const COLOR_MUTED = '#595959'
 export const COLOR_PEER_LINK = '#B85450'
 export const COLOR_SERVER = '#7F7F7F'
 export const COLOR_SERVER_FILL = '#D9D9D9'
+/** Phase 17 — Nexus Dashboard: node box, data links and cluster bracket (teal); the OOB cloud fill. */
+export const COLOR_ND = '#0F6F7A'
+export const COLOR_ND_FILL = '#D7EEF1'
+export const COLOR_CLOUD_FILL = '#EFEFEF'
 
-export type TopologyVisioRole = 'spine' | 'leaf' | 'ipn' | 'server' | null
+export type TopologyVisioRole = 'spine' | 'leaf' | 'ipn' | 'server' | 'nd' | 'oob' | null
 
 /** Phase 14 — how an edge is drawn. */
-export type TopologyVisioEdgeKind = 'fabric' | 'ipn' | 'vpc-peer-link' | 'server'
+export type TopologyVisioEdgeKind = 'fabric' | 'ipn' | 'vpc-peer-link' | 'server' | 'nd-data' | 'nd-mgmt'
 
 /** Port group of a schematic panel (re-exported for the orchestration layer). */
 export type SchematicGroup = SchematicPortGroup
@@ -73,9 +77,14 @@ export type ResolvedPanel =
   | { kind: 'schematic'; ru: number; groups: SchematicGroup[]; modelId?: string }
   // Phase 14 — generic server box when the UCS pack has no master for the model.
   | { kind: 'server-box'; ru: number; modelId: string }
+  // Phase 17 — the OOB-management network outside the design (an ellipse).
+  | { kind: 'cloud' }
 
 /** Generic server box: 19 in wide, RU-tall, like a chassis. */
 export const SERVER_BOX_W = 19
+/** Phase 17 — the OOB cloud ellipse, in drawing inches at 1:12 geometry. */
+export const CLOUD_W = 14
+export const CLOUD_H = 6
 
 export interface TopologyVisioNode {
   id: string
@@ -108,6 +117,8 @@ export interface TopologyVisioEdge {
 /** Phase 14 — a vPC pair drawn as a dashed bracket around its two panels. */
 export interface TopologyVisioPair {
   id: string
+  /** Phase 17 — 'nd' = the Nexus Dashboard cluster bracket (teal, labelled with the cluster PID). */
+  kind?: 'vpc' | 'nd'
   memberIds: string[]
   label: string
 }
@@ -307,6 +318,7 @@ function panelSize(diag: Diagram, n: TopologyVisioNode): { w: number; h: number 
     return { w, h: (w * px.h) / px.w }
   }
   if (p.kind === 'server-box') return { w: SERVER_BOX_W, h: 1.75 * Math.max(1, p.ru) }
+  if (p.kind === 'cloud') return { w: CLOUD_W, h: CLOUD_H }
   return { w: 19, h: 1.75 * Math.max(1, p.ru) }
 }
 
@@ -380,16 +392,22 @@ export function buildTopologyDiagram(
         ref = diag.image(page, { bytes: n.panel.bytes, kind: n.panel.imageKind }, x, y, { w: size.w })
       } else if (n.panel.kind === 'server-box') {
         // Generic server: a grey chassis with the model printed inside.
+        // Phase 17 — a Nexus Dashboard node is the same box in teal.
+        const nd = n.role === 'nd'
         const modelText = fitText(n.panel.modelId, size.w - 0.4, k, 7, 4.5, true)
         ref = diag.box(page, x, y, size.w, size.h, {
-          fill: COLOR_SERVER_FILL,
-          line: COLOR_SERVER,
+          fill: nd ? COLOR_ND_FILL : COLOR_SERVER_FILL,
+          line: nd ? COLOR_ND : COLOR_SERVER,
           weight: 0.012,
           text: modelText.text,
           fontPt: modelText.pt,
           bold: true,
           textColor: '#262626'
         })
+      } else if (n.panel.kind === 'cloud') {
+        // Phase 17 — the OOB-management network: a dashed ellipse.
+        const e = diag.ellipse(page, x, y, size.w / 2, size.h / 2, { color: COLOR_MUTED, weight: 0.014, pattern: 2 })
+        ref = { ...e, x0: x - size.w / 2, y0: y - size.h / 2, x1: x + size.w / 2, y1: y + size.h / 2 }
       } else {
         if (n.panel.kind === 'master') {
           pageProblems.push(`${n.id}: master '${n.panel.masterName}' not registered — drew a schematic panel`)
@@ -526,24 +544,27 @@ export function buildTopologyDiagram(
 
     // ── vPC pair brackets (Phase 14, decision 11) ──
     let bracketsDrawn = 0
+    let ndBracketsDrawn = 0
     for (const p of spec.pairs ?? []) {
       const members = p.memberIds.map((id) => placed.get(id)).filter((m): m is PlacedNode => !!m)
-      if (members.length < 2) continue
+      if (members.length < (p.kind === 'nd' ? 1 : 2)) continue
       const pad = 0.25 * k
+      const color = p.kind === 'nd' ? COLOR_ND : COLOR_PEER_LINK
       const x0 = Math.min(...members.map((m) => Math.min(m.rect.x0, m.labelRect?.x0 ?? m.rect.x0))) - pad
       const x1 = Math.max(...members.map((m) => Math.max(m.rect.x1, m.labelRect?.x1 ?? m.rect.x1))) + pad
       const y0 = Math.min(...members.map((m) => Math.min(m.rect.y0, m.labelRect?.y0 ?? m.rect.y0))) - pad
       const y1 = Math.max(...members.map((m) => Math.max(m.rect.y1, m.labelRect?.y1 ?? m.rect.y1))) + pad
       diag.box(page, (x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, {
         transparent: true,
-        line: COLOR_PEER_LINK,
+        line: color,
         weight: 0.012,
         pattern: 2
       })
       const lh = diag.textHeight(page, p.label, 6)
       const lw = textWidthIn(p.label, 6, k) + 0.2 * k
-      diag.text(page, x0 + lw / 2 + 0.05 * k, y0 - lh / 2, lw, lh, p.label, { fontPt: 6, color: COLOR_PEER_LINK, bold: true })
-      bracketsDrawn += 1
+      diag.text(page, x0 + lw / 2 + 0.05 * k, y0 - lh / 2, lw, lh, p.label, { fontPt: 6, color, bold: true })
+      if (p.kind === 'nd') ndBracketsDrawn += 1
+      else bracketsDrawn += 1
     }
 
     // ── links ──
@@ -551,6 +572,8 @@ export function buildTopologyDiagram(
     const portPt = 4
     let peerLinksDrawn = 0
     let serverLinesDrawn = 0
+    let ndDataDrawn = 0
+    let ndMgmtDrawn = 0
     for (const e of spec.edges) {
       const a = placed.get(e.source)
       const b = placed.get(e.target)
@@ -563,6 +586,8 @@ export function buildTopologyDiagram(
       const kind = edgeKindOf(e, a, b)
       if (kind === 'vpc-peer-link') peerLinksDrawn += 1
       if (kind === 'server') serverLinesDrawn += 1
+      if (kind === 'nd-data') ndDataDrawn += 1
+      if (kind === 'nd-mgmt') ndMgmtDrawn += 1
       if (kind === 'vpc-peer-link') {
         // Phase 15 — port-channel symbol: one straight line per member cable
         // and the Cisco oval across the middle of the bundle (no text). Visio's y axis points
@@ -577,9 +602,9 @@ export function buildTopologyDiagram(
         diag.ellipse(page, g.mid.x, g.mid.y, g.rx, g.ry, { color: COLOR_PEER_LINK, weight: 0.016, angle: (g.angleDeg * Math.PI) / 180 })
       } else {
         diag.line(page, la.x, la.y, lb.x, lb.y, {
-          color: kind === 'ipn' ? COLOR_IPN : kind === 'server' ? COLOR_SERVER : COLOR_FABRIC,
-          weight: kind === 'server' ? 0.01 : 0.014,
-          pattern: kind === 'ipn' ? 2 : 1
+          color: kind === 'ipn' ? COLOR_IPN : kind === 'server' ? COLOR_SERVER : kind === 'nd-data' ? COLOR_ND : kind === 'nd-mgmt' ? COLOR_MUTED : COLOR_FABRIC,
+          weight: kind === 'server' || kind === 'nd-mgmt' ? 0.01 : 0.014,
+          pattern: kind === 'ipn' || kind === 'nd-mgmt' ? 2 : 1
         })
       }
       if (!pointTouchesRect(la.x, la.y, a.rect) || !pointTouchesRect(lb.x, lb.y, b.rect)) {
@@ -694,6 +719,8 @@ export function buildTopologyDiagram(
       ...(peerLinksDrawn ? ([['vPC peer-link — port-channel oval across the member cables (leaf ↔ leaf), red', COLOR_PEER_LINK, 1]] as Array<[string, string, number]>) : []),
       ...(bracketsDrawn ? ([['vPC pair without a peer-link (bracket)', COLOR_PEER_LINK, 2]] as Array<[string, string, number]>) : []),
       ...(serverLinesDrawn ? ([['Server NIC (one line per NIC; symbol per leaf or per vPC pair)', COLOR_SERVER, 1]] as Array<[string, string, number]>) : []),
+      ...(ndDataDrawn ? ([['Nexus Dashboard data (fabric0/1, active-standby), teal; cluster bracket = the cluster PID', COLOR_ND, 1]] as Array<[string, string, number]>) : []),
+      ...(ndMgmtDrawn ? ([['Nexus Dashboard management (mgmt0/1), dashed; dashed ellipse = OOB network outside this design', COLOR_MUTED, 2]] as Array<[string, string, number]>) : []),
       ...(smartMark ? ([['Purple mark on a panel = smart switch (DPU)', '#7030A0', 1]] as Array<[string, string, number]>) : [])
     ]
     // Up to six rows (Phase 14 added peer-link / bracket / server) at a
@@ -708,7 +735,8 @@ export function buildTopologyDiagram(
       kinds.has('master') && 'Cisco stencil masters',
       kinds.has('image') && 'product photos',
       kinds.has('schematic') && 'generated schematic panels',
-      kinds.has('server-box') && 'generic server boxes'
+      kinds.has('server-box') && 'generic server boxes',
+      ndBracketsDrawn > 0 && 'Nexus Dashboard nodes as teal boxes'
     ]
       .filter(Boolean)
       .join(' · ')

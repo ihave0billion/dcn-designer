@@ -316,7 +316,7 @@ describe('buildScene — vPC pairs (Phase 14)', () => {
     expect(pl[0]).toMatchObject({ source: 'leaf-1', target: 'leaf-2', count: 2, label: '2 × 400G peer-link' })
     expect(scene.edges.filter((e) => e.kind === 'fabric')).toHaveLength(6)
     // The pair is listed; with a peer-link drawn it needs no bracket.
-    expect(scene.pairs).toEqual([{ id: 'pair-1', memberIds: ['leaf-1', 'leaf-2'], label: 'vPC pair', bracket: false }])
+    expect(scene.pairs).toEqual([{ id: 'pair-1', kind: 'vpc', memberIds: ['leaf-1', 'leaf-2'], label: 'vPC pair', bracket: false }])
   })
 
   it('fabric / fabrics levels fold the peer-link away (both ends land on the same tile)', () => {

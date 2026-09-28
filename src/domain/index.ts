@@ -26,6 +26,27 @@ export {
 } from './multipod'
 export { ipnRouterSpecFromFileEntry, pickIpnRouter } from './ipn'
 export {
+  ND_CLUSTERS,
+  ND_CLUSTER_IDS,
+  ND_DATA_PORTS,
+  ND_MGMT_PORTS,
+  ND_DATA_SPEEDS_G,
+  ND_MGMT_SPEEDS_G,
+  ND_DEFAULT_NODE_COUNT,
+  ND_DEFAULT_DATA_SPEED_G,
+  ND_DEFAULT_MGMT_SPEED_G,
+  ND_NODE_POWER_W,
+  ND_DEVICE_ID,
+  OOB_MGMT_DEVICE_ID,
+  OOB_MGMT_LABEL,
+  OOB_MGMT_PORT,
+  isNdClusterModelId,
+  ndSpecFor,
+  planNexusDashboard,
+  rackOfDevice
+} from './nexus-dashboard'
+export type { NdClusterModelId, NdClusterSpec, PlanNexusDashboardInput, PlanNexusDashboardOutput } from './nexus-dashboard'
+export {
   effectiveVpcSettings,
   peerLinkGroupFor,
   uplinkBudgetAfterPeerLink,
@@ -60,6 +81,8 @@ export type {
   IpnRoutersFile,
   IpnRouterSpec,
   MultiPodAnalysis,
+  NexusDashboardRequest,
+  NexusDashboardResult,
   OpticsBomEntry,
   OpticsBomScenario,
   PodVariant,

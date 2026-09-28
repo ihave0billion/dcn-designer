@@ -42,7 +42,7 @@ describe('buildPdfScenePages', () => {
     expect(spine.y).toBeLessThan(leaf.y)
     expect(spine.labelAbove).toBe(true)
     expect(leaf.labelAbove).toBe(false)
-    expect(page.counts).toEqual({ spine: 2, leaf: 2, ipn: 0, server: 0 })
+    expect(page.counts).toEqual({ spine: 2, leaf: 2, ipn: 0, server: 0, nd: 0, oob: 0 })
     expect(page.width).toBeGreaterThan(PANEL_W * 2)
   })
 
