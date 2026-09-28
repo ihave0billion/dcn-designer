@@ -557,7 +557,7 @@ export function BomPage({
             ? ` ${cableBom.user_specified_links} link(s) use a length entered by hand instead.`
             : ''}
           {cableBom.peer_link_links > 0
-            ? ` ${cableBom.peer_link_links} of the cables are vPC peer-links (leaf ↔ leaf, two optic/DAC ends each).`
+            ? ` ${cableBom.peer_link_links} of the cables are vPC peer-links (leaf to leaf, two optic ends each).`
             : ''}
         </Text>
         {cableBom.unresolved.map((u) => (
