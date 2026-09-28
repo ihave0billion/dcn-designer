@@ -165,6 +165,10 @@ export const RequirementsFileSchema = z.object({
     notes: ''
   }),
   racks: z.array(RackInventoryRowSchema).default([]),
+  // Phase 16 — physical rows of racks (10 = racks 1-10 are row 1, 11-20 row
+  // 2 …). Drives spine spreading in the placer and the row captions in the
+  // Rack view and the PDF. null = no row structure.
+  racks_per_row: z.number().int().positive().nullable().default(null),
   cable_tray_m: z.number().nonnegative().nullable().default(null),
   target_oversub_informational: z.number().positive().nullable().default(null)
 })
@@ -204,6 +208,7 @@ export function emptyRequirements(project: ProjectMeta): RequirementsFile {
       notes: ''
     },
     racks: [],
+    racks_per_row: null,
     cable_tray_m: null,
     target_oversub_informational: null
   }

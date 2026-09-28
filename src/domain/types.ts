@@ -174,6 +174,9 @@ export interface SolverRequirements {
   fabric: FabricRequest
   tiers: TierRequest[]
   racks?: RackInventoryEntry[]
+  // Phase 16 — physical rows: the rack inventory is read as consecutive
+  // rows of this many racks; spines are spread one per row. null = no rows.
+  racks_per_row?: number | null
 }
 
 export interface SolverContext {

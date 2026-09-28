@@ -106,3 +106,67 @@ describe('placeRacks — empty inventory', () => {
     expect(out.warnings).toHaveLength(0)
   })
 })
+
+describe('placeRacks — physical rows (Phase 16)', () => {
+  const racks = (n: number): RackInventoryEntry[] => Array.from({ length: n }, (_, i) => rack42(`Rack${i + 1}`))
+  const rackOf = (layout: ReturnType<typeof placeRacks>['layout'], id: string): string | undefined =>
+    layout.find((r) => r.devices.some((d) => d.device_id === id))?.rack_name
+
+  it('puts one spine in each row, first rack of the row', () => {
+    const { layout, warnings } = placeRacks(mkSpine(2), [mkLeafTier(32)], ALL_SWITCHES, racks(16), 10)
+    expect(warnings).toEqual([])
+    expect(rackOf(layout, 'spine-1')).toBe('Rack1')
+    expect(rackOf(layout, 'spine-2')).toBe('Rack11')
+  })
+
+  it('spreads a third and fourth spine along the rows', () => {
+    const { layout } = placeRacks(mkSpine(4), [mkLeafTier(4)], ALL_SWITCHES, racks(16), 10)
+    expect(rackOf(layout, 'spine-1')).toBe('Rack1')
+    expect(rackOf(layout, 'spine-2')).toBe('Rack11')
+    expect(rackOf(layout, 'spine-3')).toBe('Rack2')
+    expect(rackOf(layout, 'spine-4')).toBe('Rack12')
+  })
+
+  it('gives every leaf pair its own rack when there are enough racks', () => {
+    const { layout } = placeRacks(mkSpine(2), [mkLeafTier(32)], ALL_SWITCHES, racks(16), 10)
+    for (const r of layout) {
+      expect(r.devices.filter((d) => d.role === 'leaf')).toHaveLength(2)
+    }
+    expect(rackOf(layout, 'leaf-1')).toBe('Rack1')
+    expect(rackOf(layout, 'leaf-2')).toBe('Rack1')
+    expect(rackOf(layout, 'leaf-31')).toBe('Rack16')
+  })
+
+  it('keeps a second tier\'s first pair out of the first tier\'s first rack', () => {
+    // SITE-A: 30 SE1U + 2 FX3 across 16 racks — the FX3 pair must get its own
+    // rack (Rack16), not share Rack1 with the first SE1U pair.
+    const { layout } = placeRacks(
+      mkSpine(2),
+      [mkLeafTier(30), mkLeafTier(2, '9348GC-FX3')],
+      ALL_SWITCHES,
+      racks(16),
+      10
+    )
+    expect(rackOf(layout, 'leaf-31')).toBe('Rack16')
+    expect(rackOf(layout, 'leaf-32')).toBe('Rack16')
+    expect(layout.filter((r) => r.devices.length === 0)).toHaveLength(0)
+  })
+
+  it('falls back to round-robin when the row has no room', () => {
+    const tiny = [rack42('A'), rack42('B'), rack42('C')].map((r) => ({ ...r, size_u: 2 }))
+    // Row 1 = A, B (2U each, full after two 1U leaves? no: 2U racks hold 2 devices).
+    const { layout, warnings } = placeRacks(mkSpine(2), [mkLeafTier(0)], ALL_SWITCHES, tiny, 2)
+    expect(warnings).toEqual([])
+    expect(rackOf(layout, 'spine-1')).toBe('A')
+    expect(rackOf(layout, 'spine-2')).toBe('C')
+  })
+
+  it('ignores a null or zero racks_per_row (legacy behaviour)', () => {
+    const a = placeRacks(mkSpine(2), [mkLeafTier(4)], ALL_SWITCHES, racks(4), null)
+    const b = placeRacks(mkSpine(2), [mkLeafTier(4)], ALL_SWITCHES, racks(4), 0)
+    const c = placeRacks(mkSpine(2), [mkLeafTier(4)], ALL_SWITCHES, racks(4))
+    expect(a.layout).toEqual(c.layout)
+    expect(b.layout).toEqual(c.layout)
+    expect(rackOf(a.layout, 'spine-2')).toBe('Rack2')
+  })
+})

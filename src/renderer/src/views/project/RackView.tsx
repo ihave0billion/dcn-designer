@@ -458,12 +458,21 @@ export function RackView({
                 Add rack
               </Button>
             </div>
-            {requirements.racks.map((r) => {
+            {requirements.racks.map((r, idx) => {
               const stats = statsByRack.get(r.name)
               const active = selectedRackId === r.name
+              // Phase 16 — caption each physical row of racks.
+              const perRow = requirements.racks_per_row ?? null
+              const rowHeader =
+                perRow && perRow > 0 && idx % perRow === 0 ? (
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground pt-2 pb-1">
+                    Row {Math.floor(idx / perRow) + 1}
+                  </div>
+                ) : null
               return (
+                <div key={r.name}>
+                {rowHeader}
                 <button
-                  key={r.name}
                   onClick={() => {
                     setSelectedRackId(r.name)
                     setSelectedDeviceId(null)
@@ -488,6 +497,7 @@ export function RackView({
                     {stats?.used_u ?? 0}/{r.size_u} U
                   </div>
                 </button>
+                </div>
               )
             })}
           </div>

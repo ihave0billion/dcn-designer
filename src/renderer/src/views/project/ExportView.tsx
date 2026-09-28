@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Download, FileText, Loader2, RefreshCw, Shapes } from 'lucide-react'
+import { ClipboardList, Download, FileText, Loader2, RefreshCw, Shapes } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -36,7 +36,7 @@ import { exportTopologyVisio, visioExportFileName } from '@/lib/visio/export-vis
 import { loadPanelImages } from '@/lib/pdf/panel-images'
 import { buildCableBom } from '@/lib/cable-bom'
 import { buildDeviceBom } from '@/lib/device-bom'
-import { exportFileName, renderDesignReportPdf } from '@/lib/pdf/render'
+import { bomExportFileName, exportFileName, renderBomReportPdf, renderDesignReportPdf } from '@/lib/pdf/render'
 
 // Phase 9 — the Export tab.
 //
@@ -101,6 +101,9 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [lastSaved, setLastSaved] = useState<string | null>(null)
+  // Phase 16 — standalone BOM export.
+  const [bomBusy, setBomBusy] = useState(false)
+  const [bomSaved, setBomSaved] = useState<string | null>(null)
 
   const refreshExports = useCallback(async () => {
     try {
@@ -267,6 +270,47 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
     [buildVisio, projectPath, refreshExports]
   )
 
+  // Phase 16 — standalone bill of materials. Same archive + save-a-copy
+  // pattern as the design report; the document is one page.
+  const buildBom = useCallback(async (): Promise<{ bytes: Uint8Array; name: string }> => {
+    if (!design) throw new Error('No design to export')
+    const generatedAt = new Date().toISOString()
+    const bytes = await renderBomReportPdf({ requirements, design, links, switches, generatedAt })
+    return { bytes, name: bomExportFileName(requirements.project.name, generatedAt) }
+  }, [design, links, requirements, switches])
+
+  const handleExportBom = useCallback(async () => {
+    setBomBusy(true)
+    setErr(null)
+    setBomSaved(null)
+    try {
+      const { bytes, name } = await buildBom()
+      const dest = `${projectPath}/exports/${name}`
+      await window.dcn.writeBinaryFile(dest, bytes)
+      setBomSaved(dest)
+      await refreshExports()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBomBusy(false)
+    }
+  }, [buildBom, projectPath, refreshExports])
+
+  const handleSaveBomCopy = useCallback(async () => {
+    setBomBusy(true)
+    setErr(null)
+    try {
+      const { bytes, name } = await buildBom()
+      const target = await window.dcn.showSavePdfPicker('Export bill of materials', name)
+      if (!target) return
+      await window.dcn.writeBinaryFile(target, bytes)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBomBusy(false)
+    }
+  }, [buildBom])
+
   const handleSaveCopy = useCallback(async () => {
     setBusy(true)
     setErr(null)
@@ -369,6 +413,37 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
               )}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Export bill of materials</CardTitle>
+          <CardDescription>
+            A one-page PDF of just the BOM — switches, optics and cables, the same tables as the
+            Summary tab and the design report — for procurement and quoting.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleExportBom} disabled={bomBusy || busy}>
+              {bomBusy ? <Loader2 className="animate-spin" /> : <ClipboardList />}
+              {bomBusy ? 'Rendering…' : 'Export BOM PDF'}
+            </Button>
+            <Button variant="outline" onClick={handleSaveBomCopy} disabled={bomBusy || busy}>
+              <Download />
+              Save a copy…
+            </Button>
+          </div>
+          {bomSaved && (
+            <p className="text-sm text-muted-foreground">
+              Saved to <span className="font-mono">{bomSaved}</span>
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            {deviceBom.total_devices} devices · {design.optics_bom.length} optics rows ·{' '}
+            {cableBom.costed_links} of {cableBom.total_links} cables costed
+          </p>
         </CardContent>
       </Card>
 

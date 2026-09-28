@@ -94,7 +94,8 @@ export function requirementsToSolverInput(req: RequirementsFile): SolverRequirem
       name: r.name,
       size_u: r.size_u,
       pdu_kw_budget: r.pdu_kw_budget
-    }))
+    })),
+    racks_per_row: req.racks_per_row ?? null
   }
 }
 

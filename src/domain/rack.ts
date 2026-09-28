@@ -146,7 +146,8 @@ export function placeRacks(
   spine: SpineResult | null,
   tiers: TierResult[],
   switches: SwitchSpec[],
-  rack_inventory: RackInventoryEntry[]
+  rack_inventory: RackInventoryEntry[],
+  racks_per_row: number | null = null
 ): RackPlacementResult {
   const warnings: SolverWarning[] = []
 
@@ -184,7 +185,11 @@ export function placeRacks(
     }
   }
 
+  // Pods are numbered across ALL tiers (v1.6.0 fix): numbering per tier
+  // made the first pair of every tier share pod 0, so a 1G tier's pair was
+  // packed into the same rack as the first 25G pair while a rack stayed empty.
   let leaf_serial = 0
+  let pod_base = 0
   for (const tier of tiers) {
     if (tier.xor_status !== 'ok' || tier.leaves_required <= 0) continue
     const sw = switches.find((s) => s.id === tier.leaf_model_id)
@@ -197,24 +202,46 @@ export function placeRacks(
         ru: ru(sw),
         power_w: powerW(sw),
         label: `Leaf ${leaf_serial} (${tier.leaf_model_id})`,
-        pod_index: Math.floor(i / 2)
+        pod_index: pod_base + Math.floor(i / 2)
       })
     }
+    pod_base += Math.ceil(tier.leaves_required / 2)
   }
 
   // ──────────────────────────────────────────────────────────────────
   // Spines: distribute across separate racks (HA), one rack at a time.
+  // Phase 16 — with `racks_per_row` set, the inventory is read as physical
+  // rows of that many racks and spine k goes to row (k mod rows), in the
+  // first rack of that row with room (a per-row cursor spreads a third and
+  // fourth spine along the row). Falls back to the round-robin below when
+  // no rack in the row can take it.
   // ──────────────────────────────────────────────────────────────────
   const spine_queue = queue.filter((q) => q.role === 'spine')
+  const perRow = racks_per_row != null && racks_per_row > 0 ? Math.floor(racks_per_row) : null
+  const rowCount = perRow ? Math.ceil(layout.length / perRow) : 0
+  const rowCursor = new Array<number>(rowCount).fill(0)
   let rackCursor = 0
-  for (const s of spine_queue) {
+  spine_queue.forEach((s, k) => {
     let placed = false
-    for (let attempt = 0; attempt < layout.length; attempt++) {
+    if (perRow && rowCount > 0) {
+      const row = k % rowCount
+      const start = row * perRow
+      const size = Math.min(perRow, layout.length - start)
+      for (let attempt = 0; attempt < size; attempt++) {
+        const i = start + ((rowCursor[row] + attempt) % size)
+        if (pushDevice(layout[i], s)) {
+          placed = true
+          rowCursor[row] = (rowCursor[row] + attempt + 1) % size
+          rackCursor = (i + 1) % layout.length
+          break
+        }
+      }
+    }
+    for (let attempt = 0; !placed && attempt < layout.length; attempt++) {
       const rack = layout[(rackCursor + attempt) % layout.length]
       if (pushDevice(rack, s)) {
         placed = true
         rackCursor = (rackCursor + attempt + 1) % layout.length
-        break
       }
     }
     if (!placed) {
@@ -225,7 +252,7 @@ export function placeRacks(
         context: { device_id: s.device_id, model_id: s.model_id }
       })
     }
-  }
+  })
 
   // ──────────────────────────────────────────────────────────────────
   // Leaves: pack pods together. Each pod (2 leaves) prefers an empty

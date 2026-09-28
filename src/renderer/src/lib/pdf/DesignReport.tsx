@@ -382,21 +382,44 @@ function DesignSummaryPage({
 
 // ── BOM ─────────────────────────────────────────────────────────────
 
-function BomPage({
+// Phase 16 — also the whole of the standalone BOM export (BomReport.tsx):
+// `standalone` adds the title block a one-page document needs.
+export function BomPage({
   projectName,
   design,
   deviceBom,
   cableBom,
-  cableTrayM
+  cableTrayM,
+  standalone
 }: {
   projectName: string
   design: DesignResult
   deviceBom: DeviceBom
   cableBom: CableBom
   cableTrayM: number | null
+  standalone?: { requirements: RequirementsFile; generatedAt: string }
 }): ReactElement {
   return (
     <Page size="LETTER" style={styles.page}>
+      {standalone ? (
+        <View style={{ marginBottom: 14 }}>
+          <Text style={[styles.coverTitle, { fontSize: 18 }]}>{t(standalone.requirements.project.name)}</Text>
+          {standalone.requirements.project.customer || standalone.requirements.project.site ? (
+            <Text style={[styles.coverCustomer, { fontSize: 10 }]}>
+              {[standalone.requirements.project.customer, standalone.requirements.project.site]
+                .filter(Boolean)
+                .map((s) => t(s))
+                .join(' · ')}
+            </Text>
+          ) : null}
+          <Text style={styles.coverMeta}>
+            Bill of materials · generated {fmtDate(standalone.generatedAt)} ·{' '}
+            {CANDIDATE_LABEL[design.committed_candidate_id] ?? design.committed_candidate_id} ·{' '}
+            {fmt(design.summary.total_spines)} spines, {fmt(design.summary.total_leaves)} leaves ·{' '}
+            {design.summary.valid ? 'design valid' : 'design NOT valid'}
+          </Text>
+        </View>
+      ) : null}
       <Text style={styles.h2}>Bill of materials</Text>
 
       <View style={styles.section}>
@@ -563,7 +586,7 @@ const ROLE_COLOR: Record<string, string> = {
 function RackDiagram({ rack }: { rack: DesignResult['rack_layout'][number] }): ReactElement {
   const height = rack.size_u * U_H
   return (
-    <View style={styles.rackCell}>
+    <View style={styles.rackCell} wrap={false}>
       <Text style={styles.rackName}>{t(rack.rack_name)}</Text>
       <Text style={styles.rackMeta}>
         {rack.size_u}U · {fmt(rack.estimated_power_w)} W
@@ -613,17 +636,28 @@ function RackDiagram({ rack }: { rack: DesignResult['rack_layout'][number] }): R
   )
 }
 
-const MAX_RACKS_DRAWN = 12
+const MAX_RACKS_DRAWN = 40
 
 function RackPage({
   projectName,
-  design
+  design,
+  racksPerRow
 }: {
   projectName: string
   design: DesignResult
+  racksPerRow: number | null
 }): ReactElement {
   const drawn = design.rack_layout.slice(0, MAX_RACKS_DRAWN)
   const omitted = design.rack_layout.length - drawn.length
+  // Phase 16 — physical rows: caption each group of `racksPerRow` racks.
+  const groups: Array<{ caption: string | null; racks: typeof drawn }> = []
+  if (racksPerRow && racksPerRow > 0) {
+    for (let i = 0; i < drawn.length; i += racksPerRow) {
+      groups.push({ caption: `Row ${groups.length + 1}`, racks: drawn.slice(i, i + racksPerRow) })
+    }
+  } else {
+    groups.push({ caption: null, racks: drawn })
+  }
 
   return (
     <Page size="LETTER" style={styles.page}>
@@ -640,27 +674,41 @@ function RackPage({
               </View>
             ))}
           </View>
-          <View style={[styles.rackRow, { marginTop: 8 }]}>
-            {drawn.map((rack) => (
-              <RackDiagram rack={rack} key={rack.rack_name} />
-            ))}
-          </View>
+          {groups.map((g, gi) => (
+            <View key={gi}>
+              {g.caption ? (
+                <Text style={styles.h3}>
+                  {g.caption} — {t(g.racks[0].rack_name)}
+                  {g.racks.length > 1 ? ` to ${t(g.racks[g.racks.length - 1].rack_name)}` : ''}
+                </Text>
+              ) : null}
+              <View style={[styles.rackRow, { marginTop: g.caption ? 2 : 8 }]}>
+                {g.racks.map((rack) => (
+                  <RackDiagram rack={rack} key={rack.rack_name} />
+                ))}
+              </View>
+            </View>
+          ))}
           {omitted > 0 ? (
             <Text style={styles.note}>
               {omitted} further rack(s) not drawn. See the Rack View in the app for the full layout.
             </Text>
           ) : null}
-          <View style={styles.table}>
+          <View style={styles.table} wrap={false}>
             <View style={styles.trHead}>
               <Text style={[styles.th, { flex: 2 }]}>Rack</Text>
+              <Text style={[styles.th, { flex: 1 }]}>Row</Text>
               <Text style={[styles.th, { flex: 1 }, styles.right]}>Size</Text>
               <Text style={[styles.th, { flex: 1 }, styles.right]}>Devices</Text>
               <Text style={[styles.th, { flex: 1.4 }, styles.right]}>Power (W)</Text>
               <Text style={[styles.th, { flex: 1.4 }, styles.right]}>PDU budget</Text>
             </View>
-            {design.rack_layout.map((r) => (
+            {design.rack_layout.map((r, i) => (
               <View style={styles.tr} key={r.rack_name}>
                 <Text style={[styles.td, { flex: 2 }]}>{t(r.rack_name)}</Text>
+                <Text style={[styles.td, { flex: 1 }]}>
+                  {racksPerRow && racksPerRow > 0 ? `Row ${Math.floor(i / racksPerRow) + 1}` : '—'}
+                </Text>
                 <Text style={[styles.td, { flex: 1 }, styles.right]}>{r.size_u}U</Text>
                 <Text style={[styles.td, { flex: 1 }, styles.right]}>{r.devices.length}</Text>
                 <Text
@@ -1007,7 +1055,7 @@ export function DesignReport({
         cableBom={cableBom}
         cableTrayM={requirements.cable_tray_m}
       />
-      <RackPage projectName={projectName} design={design} />
+      <RackPage projectName={projectName} design={design} racksPerRow={requirements.racks_per_row ?? null} />
       {topoPages.length === 0 ? (
         <TopologyPage projectName={projectName} page={null} />
       ) : (

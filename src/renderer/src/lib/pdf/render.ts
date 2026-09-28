@@ -1,4 +1,5 @@
 import type { DesignReportInput } from './DesignReport'
+import type { BomReportInput } from './BomReport'
 
 // Phase 9 — render the report to bytes.
 //
@@ -14,7 +15,7 @@ import type { DesignReportInput } from './DesignReport'
 // is statically importable, so a view can name the file without paying for
 // the engine.
 
-export type { DesignReportInput }
+export type { DesignReportInput, BomReportInput }
 
 /** Suggested filename: `<project>-<YYYY-MM-DD>.pdf`, filesystem-safe. */
 export function exportFileName(projectName: string, generatedAt: string): string {
@@ -26,6 +27,21 @@ export function exportFileName(projectName: string, generatedAt: string): string
       .toLowerCase() || 'design'
   const date = generatedAt.slice(0, 10)
   return `${slug}-${date}.pdf`
+}
+
+/** Phase 16 — `<project>-bom-<YYYY-MM-DD>.pdf`, next to the report's name. */
+export function bomExportFileName(projectName: string, generatedAt: string): string {
+  return exportFileName(projectName, generatedAt).replace(/\.pdf$/, '').replace(/-(\d{4}-\d{2}-\d{2})$/, '-bom-$1') + '.pdf'
+}
+
+/** Phase 16 — render the standalone bill of materials (one page). */
+export async function renderBomReportPdf(input: BomReportInput): Promise<Uint8Array> {
+  const [{ pdf }, { BomReport }] = await Promise.all([
+    import('@react-pdf/renderer'),
+    import('./BomReport')
+  ])
+  const blob = await pdf(BomReport(input)).toBlob()
+  return new Uint8Array(await blob.arrayBuffer())
 }
 
 /** Render the design report and resolve with the raw PDF bytes. */

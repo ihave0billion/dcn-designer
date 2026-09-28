@@ -817,6 +817,24 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
             title="Racks"
             description="Rack inventory used by the solver's placement heuristic and PDU budget check."
           >
+            <Field label="Racks per row">
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                value={form.racks_per_row ?? ''}
+                onChange={(e) =>
+                  patch('racks_per_row', e.target.value ? Math.max(1, Math.floor(Number(e.target.value))) : null)
+                }
+                placeholder="e.g. 10"
+                className="max-w-xs"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Racks are read as physical rows of this many, in list order. The solver puts one spine in
+                each row (first rack of the row) and the Rack view and PDF caption the rows. Leave empty for
+                no row structure.
+              </p>
+            </Field>
             <div className="border rounded-md">
               <Table>
                 <TableHeader>

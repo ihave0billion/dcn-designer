@@ -161,7 +161,8 @@ export function solve(
     spineComp.spine,
     tierResults,
     context.switches,
-    deviceRacks
+    deviceRacks,
+    requirements.racks_per_row ?? null
   )
   warnings.push(...rackResult.warnings)
 
@@ -251,6 +252,7 @@ export function solve(
     breakout_pairs: context.breakout_pairs,
     switches: context.switches,
     rack_inventory: deviceRacks,
+    racks_per_row: requirements.racks_per_row ?? null,
     base_warnings
   })
   warnings.push(...candidatesOut.fabric_warnings)

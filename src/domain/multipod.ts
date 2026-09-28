@@ -287,6 +287,8 @@ export interface BuildCandidatesInput {
   breakout_pairs: BreakoutPair[]
   switches: SwitchSpec[]
   rack_inventory: RackInventoryEntry[]
+  /** Phase 16 — physical rows of racks; see SolverRequirements.racks_per_row. */
+  racks_per_row?: number | null
   /**
    * Phase 10 — warnings raised before candidate construction (tier math,
    * unknown spine model, use-case constraints). They describe the inputs,
@@ -313,14 +315,15 @@ export interface BuildCandidatesOutput {
 export function buildCandidates(input: BuildCandidatesInput): BuildCandidatesOutput {
   const { tiers, spine_switch, ipn_router, fabric, breakout_pairs, switches, rack_inventory } =
     input
+  const racks_per_row = input.racks_per_row ?? null
   const aci_multipod_allowed = fabric.aci_multipod_allowed !== false // default true
   const base_blocking = (input.base_warnings ?? []).filter((w) => w.severity === 'error')
 
   let candidates: DesignCandidate[] = [
-    buildSinglePodCandidate('single_no_breakout', false, tiers, spine_switch, fabric, breakout_pairs, switches, rack_inventory),
-    buildSinglePodCandidate('single_with_breakout', true, tiers, spine_switch, fabric, breakout_pairs, switches, rack_inventory),
-    buildMultiPodCandidate('multi_no_breakout', false, tiers, spine_switch, ipn_router, fabric, breakout_pairs, switches, rack_inventory, !aci_multipod_allowed),
-    buildMultiPodCandidate('multi_with_breakout', true, tiers, spine_switch, ipn_router, fabric, breakout_pairs, switches, rack_inventory, !aci_multipod_allowed)
+    buildSinglePodCandidate('single_no_breakout', false, tiers, spine_switch, fabric, breakout_pairs, switches, rack_inventory, racks_per_row),
+    buildSinglePodCandidate('single_with_breakout', true, tiers, spine_switch, fabric, breakout_pairs, switches, rack_inventory, racks_per_row),
+    buildMultiPodCandidate('multi_no_breakout', false, tiers, spine_switch, ipn_router, fabric, breakout_pairs, switches, rack_inventory, racks_per_row, !aci_multipod_allowed),
+    buildMultiPodCandidate('multi_with_breakout', true, tiers, spine_switch, ipn_router, fabric, breakout_pairs, switches, rack_inventory, racks_per_row, !aci_multipod_allowed)
   ]
 
   if (base_blocking.length > 0) {
@@ -374,7 +377,8 @@ function buildSinglePodCandidate(
   fabric: FabricRequest,
   breakout_pairs: BreakoutPair[],
   switches: SwitchSpec[],
-  rack_inventory: RackInventoryEntry[]
+  rack_inventory: RackInventoryEntry[],
+  racks_per_row: number | null
 ): DesignCandidate {
   const comp = computeSpine(
     tiers,
@@ -438,7 +442,7 @@ function buildSinglePodCandidate(
   const spine_for_racks: SpineResult | null = comp.spine
     ? { ...comp.spine, spines_needed: total_spines }
     : null
-  const rackResult = placeRacks(spine_for_racks, tiers, switches, rack_inventory)
+  const rackResult = placeRacks(spine_for_racks, tiers, switches, rack_inventory, racks_per_row)
   warnings.push(...rackResult.warnings)
 
   const optics_bom = buildCandidateOpticsBom(
@@ -479,6 +483,7 @@ function buildMultiPodCandidate(
   breakout_pairs: BreakoutPair[],
   switches: SwitchSpec[],
   rack_inventory: RackInventoryEntry[],
+  racks_per_row: number | null,
   license_blocked: boolean
 ): DesignCandidate {
   const warnings: SolverWarning[] = []
@@ -649,7 +654,7 @@ function buildMultiPodCandidate(
   const rack_spine_for_layout: SpineResult | null = per_pod_comp.spine
     ? { ...per_pod_comp.spine, spine_model_id: spine_switch.id, spines_needed: total_spines, spine_ports: native_spine_ports }
     : null
-  const rackResult = placeRacks(rack_spine_for_layout, tiers, switches, rack_inventory)
+  const rackResult = placeRacks(rack_spine_for_layout, tiers, switches, rack_inventory, racks_per_row)
   warnings.push(...rackResult.warnings)
   // When no rack inventory exists, placeRacks returns an empty layout. A
   // multi-pod design must still expose its full device set (every spine,
