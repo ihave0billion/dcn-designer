@@ -10,6 +10,7 @@ import type { TopologyGraph } from '@/lib/topology-extractor'
 import { buildCableBom, cableKindLabel, cableMediaLabel, unresolvedLabel, type CableBom } from '@/lib/cable-bom'
 import type { ServerInfoResolver } from '@/lib/server-symbols'
 import { buildDeviceBom, type DeviceBom } from '@/lib/device-bom'
+import { buildOpticsBom, opticSideLabel, type OpticsBom } from '@/lib/optics-bom'
 import { findCandidate } from '@/lib/design-projection'
 import { endpointTotals } from '@/lib/endpoint-totals'
 import type { TopologyLayoutFile } from '@/schemas/topology-layout'
@@ -384,6 +385,7 @@ export function BomPage({
   design,
   deviceBom,
   cableBom,
+  opticsBom,
   cableTrayM,
   standalone
 }: {
@@ -391,6 +393,7 @@ export function BomPage({
   design: DesignResult
   deviceBom: DeviceBom
   cableBom: CableBom
+  opticsBom: OpticsBom
   cableTrayM: number | null
   standalone?: { requirements: RequirementsFile; generatedAt: string }
 }): ReactElement {
@@ -478,29 +481,77 @@ export function BomPage({
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.h3}>Optics</Text>
-        {design.optics_bom.length === 0 ? (
-          <Empty>No optics required — no breakout pair is in effect for this design.</Empty>
+        <Text style={styles.h3}>Optics (transceivers)</Text>
+        {opticsBom.total_ends === 0 ? (
+          <Empty>No cable links yet — seed them from the Links tab to count transceivers.</Empty>
+        ) : opticsBom.rows.length === 0 ? (
+          <Empty>Every cable end is DAC or AOC — no separate transceivers to order.</Empty>
         ) : (
           <View style={styles.table}>
             <View style={styles.trHead}>
-              <Text style={[styles.th, { flex: 3 }]}>Optic PID</Text>
-              <Text style={[styles.th, { flex: 1 }]}>Scenario</Text>
-              <Text style={[styles.th, { flex: 1 }]}>Location</Text>
-              <Text style={[styles.th, { flex: 1 }, styles.right]}>Qty</Text>
-              <Text style={[styles.th, { flex: 2 }]}>Notes</Text>
+              <Text style={[styles.th, { flex: 1.6 }]}>Side</Text>
+              <Text style={[styles.th, { flex: 2.2 }]}>Switch model</Text>
+              <Text style={[styles.th, { flex: 0.9 }, styles.right]}>Speed</Text>
+              <Text style={[styles.th, { flex: 1.8 }]}>Media</Text>
+              <Text style={[styles.th, { flex: 2.6 }]}>Optic PID</Text>
+              <Text style={[styles.th, { flex: 0.9 }, styles.right]}>Qty</Text>
             </View>
-            {design.optics_bom.map((o, i) => (
-              <View style={styles.tr} key={`${o.optic_id}-${o.location}-${i}`}>
-                <Text style={[styles.td, { flex: 3 }]}>{t(o.optic_id)}</Text>
-                <Text style={[styles.td, { flex: 1 }]}>{o.scenario}</Text>
-                <Text style={[styles.td, { flex: 1 }]}>{o.location}</Text>
-                <Text style={[styles.td, { flex: 1 }, styles.right]}>{fmt(o.count)}</Text>
-                <Text style={[styles.td, { flex: 2 }]}>{t(o.notes)}</Text>
+            {opticsBom.rows.map((r, i) => (
+              <View style={styles.tr} key={`${r.side}-${r.kind}-${r.model_id ?? ''}-${r.speed_g}-${r.media}-${r.optic_id ?? ''}-${i}`}>
+                <Text style={[styles.td, { flex: 1.6 }]}>{opticSideLabel(r)}</Text>
+                <Text style={[styles.td, { flex: 2.2 }]}>{t(r.model_id)}</Text>
+                <Text style={[styles.td, { flex: 0.9 }, styles.right]}>{fmt(r.speed_g)}G</Text>
+                <Text style={[styles.td, { flex: 1.8 }]}>{cableMediaLabel(r.media)}</Text>
+                <Text style={[styles.td, { flex: 2.6 }, r.optic_id ? {} : { color: COLORS.warn }]}>
+                  {r.optic_id ?? `not set${r.optic_hint ? ` (${pdfText(r.optic_hint)})` : ''}`}
+                </Text>
+                <Text style={[styles.td, { flex: 0.9 }, styles.right]}>{fmt(r.count)}</Text>
               </View>
             ))}
+            <View style={styles.trTotal}>
+              <Text style={[styles.tdBold, { flex: 9.1 }]}>
+                Total transceivers — spine {fmt(opticsBom.by_side.spine)} · leaf {fmt(opticsBom.by_side.leaf)}
+                {opticsBom.by_side.peer_link > 0 ? ` · peer-link ${fmt(opticsBom.by_side.peer_link)}` : ''}
+                {opticsBom.by_side.other > 0 ? ` · other ${fmt(opticsBom.by_side.other)}` : ''}
+              </Text>
+              <Text style={[styles.tdBold, { flex: 0.9 }, styles.right]}>{fmt(opticsBom.total_transceivers)}</Text>
+            </View>
           </View>
         )}
+        <Text style={styles.note}>
+          One transceiver per fiber cable end; a breakout spine port counts once. DAC / AOC ends are cable-integrated
+          {opticsBom.integrated_ends > 0 ? ` (${fmt(opticsBom.integrated_ends)} such ends here)` : ''}.
+        </Text>
+        {opticsBom.ends_without_pid > 0 ? (
+          <Text style={[styles.note, { color: COLORS.warn }]}>
+            {fmt(opticsBom.ends_without_pid)} of {fmt(opticsBom.total_transceivers)} transceivers have no optic PID yet — pick one per
+            link on the Links tab (Edit, Optic field) or import a CSV with the optic_id column. The form factor in brackets is the switch
+            library's hint.
+          </Text>
+        ) : null}
+        {design.optics_bom.length > 0 ? (
+          <>
+            <Text style={[styles.h3, { marginTop: 10 }]}>Solver breakout estimate</Text>
+            <View style={styles.table}>
+              <View style={styles.trHead}>
+                <Text style={[styles.th, { flex: 3 }]}>Optic PID</Text>
+                <Text style={[styles.th, { flex: 1 }]}>Scenario</Text>
+                <Text style={[styles.th, { flex: 1 }]}>Location</Text>
+                <Text style={[styles.th, { flex: 1 }, styles.right]}>Qty</Text>
+                <Text style={[styles.th, { flex: 2 }]}>Notes</Text>
+              </View>
+              {design.optics_bom.map((o, i) => (
+                <View style={styles.tr} key={`${o.optic_id}-${o.location}-${i}`}>
+                  <Text style={[styles.td, { flex: 3 }]}>{t(o.optic_id)}</Text>
+                  <Text style={[styles.td, { flex: 1 }]}>{o.scenario}</Text>
+                  <Text style={[styles.td, { flex: 1 }]}>{o.location}</Text>
+                  <Text style={[styles.td, { flex: 1 }, styles.right]}>{fmt(o.count)}</Text>
+                  <Text style={[styles.td, { flex: 2 }]}>{t(o.notes)}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : null}
       </View>
 
       <View style={styles.section}>
@@ -1029,6 +1080,7 @@ export function DesignReport({
 }: DesignReportInput): ReactElement<DocumentProps> {
   const deviceBom = buildDeviceBom(design, switches)
   const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m, default_media: requirements.default_cable_media })
+  const opticsBom = buildOpticsBom({ links, design, switches, default_media: requirements.default_cable_media })
   const projectName = requirements.project.name
   const ruById = new Map(switches.map((s) => [s.id, s.ru]))
   const topoPages = buildPdfScenePages(topology, projectName, topologyLayout ?? null, {
@@ -1053,6 +1105,7 @@ export function DesignReport({
         design={design}
         deviceBom={deviceBom}
         cableBom={cableBom}
+        opticsBom={opticsBom}
         cableTrayM={requirements.cable_tray_m}
       />
       <RackPage projectName={projectName} design={design} racksPerRow={requirements.racks_per_row ?? null} />

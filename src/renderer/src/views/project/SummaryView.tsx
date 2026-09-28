@@ -19,6 +19,7 @@ import type { DesignResult } from '@domain'
 import { loadCableLinks, loadSwitchesFile } from '@/lib/library-io'
 import { buildDeviceBom } from '@/lib/device-bom'
 import { buildCableBom, cableKindLabel, cableMediaLabel } from '@/lib/cable-bom'
+import { buildOpticsBom, opticSideLabel } from '@/lib/optics-bom'
 import { findCandidate } from '@/lib/design-projection'
 import { endpointTotals } from '@/lib/endpoint-totals'
 import { SeverityBadge, StatusPill } from '@/components/design-status'
@@ -118,6 +119,7 @@ export function SummaryView({
   const deviceBom = buildDeviceBom(design, switches)
   const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m, default_media: requirements.default_cable_media })
   const rackCount = design.rack_layout.length
+  const opticsBom = buildOpticsBom({ links, design, switches, default_media: requirements.default_cable_media })
   const endpoints = endpointTotals(design)
 
   return (
@@ -277,32 +279,54 @@ export function SummaryView({
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Optics</CardTitle>
-              <CardDescription>{design.optics_bom.length} BOM rows</CardDescription>
+              <CardDescription>
+                {opticsBom.total_transceivers.toLocaleString()} transceivers · spine {opticsBom.by_side.spine} · leaf{' '}
+                {opticsBom.by_side.leaf}
+                {opticsBom.by_side.peer_link > 0 ? ` · peer-link ${opticsBom.by_side.peer_link}` : ''}
+                {opticsBom.integrated_ends > 0 ? ` · ${opticsBom.integrated_ends} DAC/AOC ends` : ''}
+              </CardDescription>
             </CardHeader>
-            <CardContent>
-              {design.optics_bom.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No optics in this design.</p>
+            <CardContent className="space-y-2">
+              {opticsBom.total_ends === 0 ? (
+                <p className="text-sm text-muted-foreground">No cable links yet — seed them from the Links tab.</p>
+              ) : opticsBom.rows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Every cable end is DAC or AOC — nothing to order.</p>
               ) : (
                 <div className="border rounded-md">
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-28">Side</TableHead>
+                        <TableHead>Model</TableHead>
+                        <TableHead className="w-16">Speed</TableHead>
                         <TableHead>Optic</TableHead>
-                        <TableHead className="w-16">End</TableHead>
-                        <TableHead className="w-20 text-right">Qty</TableHead>
+                        <TableHead className="w-16 text-right">Qty</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {design.optics_bom.map((o, i) => (
+                      {opticsBom.rows.map((o, i) => (
                         <TableRow key={i}>
-                          <TableCell className="font-mono text-xs">{o.optic_id}</TableCell>
-                          <TableCell className="capitalize text-xs">{o.location}</TableCell>
+                          <TableCell className="text-xs">{opticSideLabel(o)}</TableCell>
+                          <TableCell className="font-mono text-xs">{o.model_id ?? '—'}</TableCell>
+                          <TableCell className="text-xs">{o.speed_g} G</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {o.optic_id ?? (
+                              <span className="font-sans text-amber-600 dark:text-amber-500">
+                                not set{o.optic_hint ? ` (${o.optic_hint})` : ''}
+                              </span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right">{o.count}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </div>
+              )}
+              {opticsBom.ends_without_pid > 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-500">
+                  {opticsBom.ends_without_pid} transceiver(s) have no optic PID — set one per link on the Links tab.
+                </p>
               )}
             </CardContent>
           </Card>

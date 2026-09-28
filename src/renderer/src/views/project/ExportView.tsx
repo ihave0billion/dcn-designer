@@ -36,6 +36,7 @@ import { exportTopologyVisio, visioExportFileName } from '@/lib/visio/export-vis
 import { loadPanelImages } from '@/lib/pdf/panel-images'
 import { buildCableBom } from '@/lib/cable-bom'
 import { buildDeviceBom } from '@/lib/device-bom'
+import { buildOpticsBom } from '@/lib/optics-bom'
 import { bomExportFileName, exportFileName, renderBomReportPdf, renderDesignReportPdf } from '@/lib/pdf/render'
 
 // Phase 9 — the Export tab.
@@ -352,6 +353,7 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
 
   const deviceBom = buildDeviceBom(design, switches)
   const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m, default_media: requirements.default_cable_media })
+  const opticsBom = buildOpticsBom({ links, design, switches, default_media: requirements.default_cable_media })
 
   return (
     <div className="p-6 space-y-4 overflow-auto h-full">
@@ -399,7 +401,11 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
                   {deviceBom.total_power_w.toLocaleString()} W
                   {deviceBom.has_estimated_power ? ' (est.)' : ''}
                 </li>
-                <li>{design.optics_bom.length} optics BOM rows</li>
+                <li>
+                  {opticsBom.total_transceivers} transceivers (spine {opticsBom.by_side.spine} · leaf {opticsBom.by_side.leaf}
+                  {opticsBom.by_side.peer_link > 0 ? ` · peer-link ${opticsBom.by_side.peer_link}` : ''})
+                  {opticsBom.ends_without_pid > 0 ? ` · ${opticsBom.ends_without_pid} without a PID` : ''}
+                </li>
                 <li>
                   {cableBom.costed_links} of {cableBom.total_links} cables costed ·{' '}
                   {cableBom.total_ordered_m.toLocaleString()} m total
@@ -420,8 +426,8 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
         <CardHeader>
           <CardTitle className="text-base">Export bill of materials</CardTitle>
           <CardDescription>
-            A one-page PDF of just the BOM — switches, optics and cables, the same tables as the
-            Summary tab and the design report — for procurement and quoting.
+            A short PDF of just the BOM — switches, transceivers (per side, model and PID) and cables, the
+            same tables as the Summary tab and the design report — for procurement and quoting.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -441,7 +447,7 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
             </p>
           )}
           <p className="text-xs text-muted-foreground">
-            {deviceBom.total_devices} devices · {design.optics_bom.length} optics rows ·{' '}
+            {deviceBom.total_devices} devices · {opticsBom.total_transceivers} transceivers ·{' '}
             {cableBom.costed_links} of {cableBom.total_links} cables costed
           </p>
         </CardContent>

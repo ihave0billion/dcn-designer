@@ -6,11 +6,12 @@ import type { CableLink } from '@/schemas/cable-links'
 import type { Switch } from '@/schemas/switches'
 import { buildCableBom } from '@/lib/cable-bom'
 import { buildDeviceBom } from '@/lib/device-bom'
+import { buildOpticsBom } from '@/lib/optics-bom'
 import { BomPage } from './DesignReport'
 
 // Phase 16 — the standalone bill of materials.
 //
-// The same BOM page the design report carries (switches, optics, cables —
+// The same BOM page the design report carries (switches, transceivers, cables —
 // built from device-bom / cable-bom, so it can never disagree with the
 // Summary tab), wrapped in its own one-page document with a title block, for
 // handing to procurement without the rest of the report.
@@ -32,6 +33,7 @@ export function BomReport({
 }: BomReportInput): ReactElement<DocumentProps> {
   const deviceBom = buildDeviceBom(design, switches)
   const cableBom = buildCableBom({ links, cable_tray_m: requirements.cable_tray_m, default_media: requirements.default_cable_media })
+  const opticsBom = buildOpticsBom({ links, design, switches, default_media: requirements.default_cable_media })
   const projectName = requirements.project.name
   return (
     <Document
@@ -46,6 +48,7 @@ export function BomReport({
         design={design}
         deviceBom={deviceBom}
         cableBom={cableBom}
+        opticsBom={opticsBom}
         cableTrayM={requirements.cable_tray_m}
         standalone={{ requirements, generatedAt }}
       />
