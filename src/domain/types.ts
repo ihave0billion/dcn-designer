@@ -399,6 +399,8 @@ export interface VpcSummary {
   pairs: VpcPair[]
   /** Leaves that could not be paired (odd leaf out of a tier). */
   unpaired: string[]
+  /** Leaves of tiers with `vpc_pairs: false` — never paired by design. */
+  excluded?: string[]
 }
 
 export interface DesignResult {

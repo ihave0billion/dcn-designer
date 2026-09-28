@@ -186,7 +186,14 @@ export function solve(
     configured_uplinks_per_leaf: budget.configured,
     effective_uplinks_per_leaf: budget.effective,
     pairs: pairing.pairs,
-    unpaired: pairing.unpaired
+    unpaired: pairing.unpaired,
+    excluded: (rackResult.layout.length > 0
+      ? rackResult.layout
+      : synthesizeLogicalLayout(spineComp.spine, tierResults, context.switches)
+    )
+      .flatMap((r) => r.devices)
+      .filter((d) => d.role === 'leaf' && noVpcModels.has(d.model_id))
+      .map((d) => d.device_id)
   }
 
   // ──────────────────────────────────────────────────────────────────

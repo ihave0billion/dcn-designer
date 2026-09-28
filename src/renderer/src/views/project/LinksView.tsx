@@ -681,7 +681,10 @@ function VpcPairsCard({
   const leafIds = leaves.map((l) => l.device_id)
   const dirty = JSON.stringify(draft) !== JSON.stringify(pairs)
   const problems = validatePairs(draft, leafIds)
-  const unpaired = unpairedLeaves(leafIds, draft)
+  const excluded = new Set(vpc.excluded ?? [])
+  const unpairedAll = unpairedLeaves(leafIds, draft)
+  const unpaired = unpairedAll.filter((id) => !excluded.has(id))
+  const notVpcd = unpairedAll.filter((id) => excluded.has(id))
   const labelOf = (id: string): string => leaves.find((l) => l.device_id === id)?.label || id
 
   function setMember(pairIdx: number, slot: 0 | 1, id: string): void {
@@ -797,6 +800,11 @@ function VpcPairsCard({
         {unpaired.length > 0 && (
           <p className="text-xs text-amber-700 dark:text-amber-400">
             Unpaired (odd leaf out, single-attached hosts only): {unpaired.map(labelOf).join(', ')}
+          </p>
+        )}
+        {notVpcd.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Not vPC'd (tier setting in Requirements): {notVpcd.map(labelOf).join(', ')}
           </p>
         )}
         {problems.length > 0 && (

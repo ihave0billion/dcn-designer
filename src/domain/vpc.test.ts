@@ -209,6 +209,7 @@ describe('solve — vPC', () => {
     )
     expect(d.vpc?.pairs).toEqual([{ id: 'pair-1', members: ['leaf-1', 'leaf-2'] }])
     expect(d.vpc?.unpaired).toEqual([])
+    expect(d.vpc?.excluded).toEqual(['leaf-3', 'leaf-4', 'leaf-5'])
     expect(d.warnings.some((w) => w.code === 'VPC_ODD_LEAF')).toBe(false)
     const reserved = d.warnings.find((w) => w.code === 'VPC_PEER_LINK_RESERVED')!
     expect(reserved.message).not.toContain('9348GC-FX3')
