@@ -331,6 +331,24 @@ describe('buildTopologyDiagram', () => {
     expect(page).toContain('vPC pair without a peer-link (bracket)')
   })
 
+  it('levels a peer-link whose members were dragged a few px off the row', () => {
+    const diag = new Diagram({ title: 't', creator: 'c' })
+    diag.registerMaster(BOX_MASTER)
+    const pl: TopologyVisioEdge = { ...edge('leaf-1', 'leaf-2', [{ a: 'Eth1/49', b: 'Eth1/49' }], '400G peer-link'), kind: 'vpc-peer-link' }
+    const low = { ...leaf('leaf-2', 138, schematic), y: leaf('leaf-2', 138, schematic).y + 2 }
+    const r = buildTopologyDiagram(
+      { ...input([]), pages: [{ title: 'V', orientation: 'vertical', nodes: [leaf('leaf-1', 0, schematic), low], edges: [pl] }] },
+      diag
+    )
+    expect(r.problems).toEqual([])
+    const page = strFromU8(unzipSync(diag.save())['visio/pages/page1.xml'])
+    const m = /<Cell N='BeginX' V='([\d.]+)'\/><Cell N='BeginY' V='([\d.]+)'\/><Cell N='EndX' V='([\d.]+)'\/><Cell N='EndY' V='([\d.]+)'\/>(?:(?!<\/Shape>)[\s\S])*?LineColor' V='#B85450'\/><Cell N='LineWeight' V='0.02'/.exec(page)
+    expect(m).not.toBeNull()
+    // horizontal member line: same y at both ends, and it leaves the panels sideways
+    expect(m![2]).toBe(m![4])
+    expect(Number(m![3]) - Number(m![1])).toBeGreaterThan(0)
+  })
+
   it('draws a server symbol as a generic box with thin NIC lines and no port labels', () => {
     const diag = new Diagram({ title: 't', creator: 'c' })
     diag.registerMaster(BOX_MASTER)

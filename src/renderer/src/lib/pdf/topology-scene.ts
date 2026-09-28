@@ -235,8 +235,17 @@ export function buildPdfScenePages(
         const acy = a.y + a.h / 2
         const bcx = b.x + b.w / 2
         const bcy = b.y + b.h / 2
-        const p1 = rectEdgePoint(acx, acy, a.w / 2, a.h / 2, bcx, bcy)
-        const p2 = rectEdgePoint(bcx, bcy, b.w / 2, b.h / 2, acx, acy)
+        let p1 = rectEdgePoint(acx, acy, a.w / 2, a.h / 2, bcx, bcy)
+        let p2 = rectEdgePoint(bcx, bcy, b.w / 2, b.h / 2, acx, acy)
+        // Phase 15 — a peer-link between two panels on (roughly) the same
+        // row is levelled at their mean height so the port-channel oval
+        // stands upright; free-drag layouts leave pairs a few px apart.
+        if (e.kind === 'vpc-peer-link' && Math.abs(acy - bcy) <= Math.min(a.h, b.h) / 2 && Math.abs(acx - bcx) > (a.w + b.w) / 2) {
+          const y = (acy + bcy) / 2
+          const left = acx <= bcx
+          p1 = { x: left ? a.x + a.w : a.x, y }
+          p2 = { x: left ? b.x : b.x + b.w, y }
+        }
         edges.push({
           id: e.id,
           kind: e.kind,

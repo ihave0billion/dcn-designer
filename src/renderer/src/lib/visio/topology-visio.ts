@@ -276,14 +276,16 @@ type Side = 'top' | 'bottom' | 'left' | 'right'
  * Which panel edge a link leaves from. Links follow the scene's flow — top/
  * bottom edges in the vertical layout, left/right in the horizontal one — like
  * the on-screen handles, even when the far end is mostly sideways (a wide row
- * of leaves under two centred spines). Only a peer on the same row falls back
- * to the geometric side.
+ * of leaves under two centred spines). Only a peer on the same row — within
+ * half a panel height (width) of it, free-drag layouts are never exact —
+ * falls back to the geometric side.
  */
 function sideTowards(from: PlacedNode, tx: number, ty: number, orientation: 'vertical' | 'horizontal'): Side {
   const dx = tx - from.cx
   const dy = ty - from.cy
-  if (orientation === 'vertical' && Math.abs(dy) > 1e-6) return dy > 0 ? 'top' : 'bottom'
-  if (orientation === 'horizontal' && Math.abs(dx) > 1e-6) return dx > 0 ? 'right' : 'left'
+  const r = from.rect
+  if (orientation === 'vertical' && Math.abs(dy) > (r.y1 - r.y0) / 2) return dy > 0 ? 'top' : 'bottom'
+  if (orientation === 'horizontal' && Math.abs(dx) > (r.x1 - r.x0) / 2) return dx > 0 ? 'right' : 'left'
   if (Math.abs(dy) >= Math.abs(dx)) return dy >= 0 ? 'top' : 'bottom'
   return dx >= 0 ? 'right' : 'left'
 }
@@ -477,6 +479,33 @@ export function buildTopologyDiagram(
                   : { x: r.x0, y: r.y0 + t * (r.y1 - r.y0) }
           landings.set(`${e.id}|${nodeId}`, { ...pt, side, slot: i, of: n })
         })
+      }
+    }
+
+    // Phase 15 — level a peer-link whose two landings sit on facing sides
+    // (both panels on the same row): the mean height keeps the bundle
+    // straight and the port-channel oval upright even when the user has
+    // dragged one tile a few px off the row. Same for a column.
+    for (const e of spec.edges) {
+      if (e.kind !== 'vpc-peer-link') continue
+      const la = landings.get(`${e.id}|${e.source}`)
+      const lb = landings.get(`${e.id}|${e.target}`)
+      if (!la || !lb) continue
+      const sideways = (s: Side): boolean => s === 'left' || s === 'right'
+      const ra = placed.get(e.source)!.rect
+      const rb = placed.get(e.target)!.rect
+      if (sideways(la.side) && sideways(lb.side)) {
+        const y = (la.y + lb.y) / 2
+        if (y >= Math.max(ra.y0, rb.y0) && y <= Math.min(ra.y1, rb.y1)) {
+          la.y = y
+          lb.y = y
+        }
+      } else if (!sideways(la.side) && !sideways(lb.side)) {
+        const x = (la.x + lb.x) / 2
+        if (x >= Math.max(ra.x0, rb.x0) && x <= Math.min(ra.x1, rb.x1)) {
+          la.x = x
+          lb.x = x
+        }
       }
     }
 

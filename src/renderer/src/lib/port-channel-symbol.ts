@@ -111,6 +111,11 @@ export function bundlePath(g: BundleGeometry): string {
  * sides of the two icon boxes instead: right side of the left one to the
  * left side of the right one (bottom → top when the layout is horizontal).
  * `box` is the icon tile size the handles sit on.
+ *
+ * Tiles are free-drag, so two members of a pair are often a few pixels
+ * apart vertically; a bundle that follows that would slant and tilt the
+ * oval. When the two centres are within half a tile of each other the
+ * bundle is levelled at their mean, which still lands on both side edges.
  */
 export function peerLinkEndpoints(
   h: { sourceX: number; sourceY: number; targetX: number; targetY: number },
@@ -121,17 +126,21 @@ export function peerLinkEndpoints(
   if (!horizontal) {
     const sc = { x: h.sourceX, y: h.sourceY - half }
     const tc = { x: h.targetX, y: h.targetY + half }
+    const level = Math.abs(sc.y - tc.y) <= half
+    const y = (sc.y + tc.y) / 2
     const sign = tc.x >= sc.x ? 1 : -1
     return [
-      { x: sc.x + sign * half, y: sc.y },
-      { x: tc.x - sign * half, y: tc.y }
+      { x: sc.x + sign * half, y: level ? y : sc.y },
+      { x: tc.x - sign * half, y: level ? y : tc.y }
     ]
   }
   const sc = { x: h.sourceX - half, y: h.sourceY }
   const tc = { x: h.targetX + half, y: h.targetY }
+  const level = Math.abs(sc.x - tc.x) <= half
+  const x = (sc.x + tc.x) / 2
   const sign = tc.y >= sc.y ? 1 : -1
   return [
-    { x: sc.x, y: sc.y + sign * half },
-    { x: tc.x, y: tc.y - sign * half }
+    { x: level ? x : sc.x, y: sc.y + sign * half },
+    { x: level ? x : tc.x, y: tc.y - sign * half }
   ]
 }

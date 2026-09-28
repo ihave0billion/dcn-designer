@@ -89,6 +89,21 @@ describe('peerLinkEndpoints', () => {
     expect(b).toEqual({ x: 56, y: 28 })
   })
 
+  it('levels the bundle when the tiles are a few pixels apart, but not when they are on different rows', () => {
+    // Target dragged 6 px lower than the source: both ends at the mean height.
+    const [a, b] = peerLinkEndpoints({ sourceX: 28, sourceY: 56, targetX: 128, targetY: 6 }, false)
+    expect(a).toEqual({ x: 56, y: 31 })
+    expect(b).toEqual({ x: 100, y: 31 })
+    // Target a whole row lower: the bundle really slants.
+    const [c, d] = peerLinkEndpoints({ sourceX: 28, sourceY: 56, targetX: 128, targetY: 100 }, false)
+    expect(c.y).toBe(28)
+    expect(d.y).toBe(128)
+    // Horizontal layout: level on x.
+    const [e, f] = peerLinkEndpoints({ sourceX: 56, sourceY: 28, targetX: 4, targetY: 128 }, true)
+    expect(e.x).toBe(30)
+    expect(f.x).toBe(30)
+  })
+
   it('joins bottom to top when the layout is horizontal', () => {
     // Source handle = right-centre, target handle = left-centre; tiles
     // stacked 100 px apart in one column.
