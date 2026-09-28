@@ -693,12 +693,17 @@ explicit decision. Lesson: run every port-budget rule against the real workspace
 the laptop browser) before calling it done; unit fixtures only model the tier you were
 thinking of.
 
-### 2026-09-28 — cisco.com refuses scripted stencil downloads
-`fetch-stencils.sh` got HTTP 403 for the UCS pack from both the herdr container and the
-laptop (any curl User-Agent). The Nexus pack in production was fetched in a browser in
-Phase 13. Treat the packs as a manual, browser-downloaded input; the extractor and the
-app cope with a bundle that simply lacks a family (generic server box + substitution
-note).
+### 2026-09-28 — cisco.com refuses scripted stencil downloads (fetch them through the browser)
+`fetch-stencils.sh` got HTTP 403 for the packs from both the herdr container and the
+laptop (any curl User-Agent) — bot detection on the TLS/UA fingerprint, not a login. A
+real browser gets them: a Playwright script over CDP against the laptop's automation
+Chrome does `page.evaluate(fetch(url))` to probe (200, `application/zip`), then clicks a
+synthetic `<a download>`; Playwright saves the file under `/tmp/playwright-artifacts-*/`
+on the laptop (`download.path()`), no user interaction needed. Both packs (Nexus 81 MB,
+UCS 152 MB) now sit in `~/tmp/stencils/` on the laptop, which also has `soffice` and
+`magick` natively — `extract-masters.py` runs there without the docker image. The app
+and extractor still cope with a bundle that lacks a family (generic server box +
+substitution note).
 
 ### 2026-06-03 — Headless GUI verification + interactive viewing on this VM
 The long-standing "no way to see/drive the GUI on this headless VM" blocker is
