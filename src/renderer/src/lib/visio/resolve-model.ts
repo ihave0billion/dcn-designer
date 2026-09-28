@@ -40,8 +40,10 @@ export function compactKey(name: string): string {
   return name
     .replace(/\s+Front$/i, '')
     .toUpperCase()
+    // "UCS-", "UCSC-", "UCS " … only when a separator follows, so the C of
+    // "UCS-C220" survives ("UCS-C220-M7" ≡ "C220 M7 Front" in the pack).
+    .replace(/^UCS[CXB]?[-\s_]+/, '')
     .replace(/[^A-Z0-9]/g, '')
-    .replace(/^UCS[CXB]?/, '')
 }
 
 /** The bundle's master name for a model: exact "<id> Front", else the same name ignoring the family prefix, else the same compact key. */

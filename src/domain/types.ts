@@ -132,6 +132,8 @@ export interface TierRequest {
   // Phase 14 — server model of the tier (display only: the Topology
   // "Show servers" symbol). Passed through to TierResult.
   server_model_id?: string | null
+  // Phase 14 — false = leaves of this tier are not vPC-paired at all.
+  vpc_pairs?: boolean
 }
 
 // Phase 14 — vPC leaf pairs. See renderer/schemas/project.ts FabricSchema
@@ -205,6 +207,8 @@ export interface TierResult {
   xor_status: 'ok' | 'empty' | 'both-set' | 'no-model' | 'unknown-model'
   // Phase 14 — pass-through of TierRequest.server_model_id (display only).
   server_model_id?: string | null
+  // Phase 14 — pass-through of TierRequest.vpc_pairs (default true).
+  vpc_pairs?: boolean
 }
 
 export interface SpineResult {

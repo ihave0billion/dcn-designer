@@ -87,7 +87,8 @@ export function requirementsToSolverInput(req: RequirementsFile): SolverRequirem
       switch_count: t.switch_count,
       leaf_model_id: t.leaf_model_id,
       override_uplink_speed_g: t.override_uplink_speed_g,
-      server_model_id: t.server_model_id ?? null
+      server_model_id: t.server_model_id ?? null,
+      vpc_pairs: t.vpc_pairs ?? true
     })),
     racks: req.racks.map((r) => ({
       name: r.name,

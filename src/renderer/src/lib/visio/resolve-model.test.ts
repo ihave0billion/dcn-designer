@@ -60,3 +60,15 @@ describe('resolveModel', () => {
     expect(r).toMatchObject({ kind: 'image', imagePath: 'images/custom.png' })
   })
 })
+
+describe('compact-key match (Phase 14 servers)', () => {
+  it('finds the UCS pack master for a servers.yaml id', async () => {
+    const { compactKey, findMasterName } = await import('./resolve-model')
+    expect(compactKey('UCS-C220-M7')).toBe('C220M7')
+    expect(compactKey('C220 M7 Front')).toBe('C220M7')
+    expect(compactKey('UCSC-C240-M7 Front')).toBe('C240M7')
+    const index = { masters: { 'C220 M7 Front': {}, 'C220 M7 Bezel': {}, 'N9K-C9364D-GX2A Front': {} }, aliases: {}, images: {} } as unknown as Parameters<typeof findMasterName>[1]
+    expect(findMasterName('UCS-C220-M7', index)).toBe('C220 M7 Front')
+    expect(findMasterName('UCS-C240-M8', index)).toBeNull()
+  })
+})

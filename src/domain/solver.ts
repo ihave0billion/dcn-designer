@@ -170,10 +170,12 @@ export function solve(
   // so they line up with the rack placement's two-per-rack grouping; the
   // empty-inventory case pairs the same ids the topology synthesises.
   // ──────────────────────────────────────────────────────────────────
+  const noVpcModels = new Set(tierResults.filter((t) => t.vpc_pairs === false).map((t) => t.leaf_model_id))
   const pairing = pairLeaves(
     rackResult.layout.length > 0
       ? rackResult.layout
-      : synthesizeLogicalLayout(spineComp.spine, tierResults, context.switches)
+      : synthesizeLogicalLayout(spineComp.spine, tierResults, context.switches),
+    noVpcModels
   )
   warnings.push(...pairing.warnings)
   const vpc: VpcSummary = {

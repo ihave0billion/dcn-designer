@@ -180,7 +180,8 @@ const REQUIREMENTS: RequirementsFile = {
       switch_count: null,
       leaf_model_id: 'N9K-C93600CD-GX',
       override_uplink_speed_g: null,
-      server_model_id: null
+      server_model_id: null,
+      vpc_pairs: true
     }
   ],
   fabric: {

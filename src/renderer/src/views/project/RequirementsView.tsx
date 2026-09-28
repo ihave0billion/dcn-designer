@@ -408,13 +408,14 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                     <TableHead>Leaf model</TableHead>
                     <TableHead className="w-32">Uplink override (G)</TableHead>
                     <TableHead className="w-44">Server model</TableHead>
+                    <TableHead className="w-12">vPC</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {form.tiers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                         No tiers yet. Add a row to describe a leaf-side speed tier.
                       </TableCell>
                     </TableRow>
@@ -513,6 +514,15 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                               ))}
                             </SelectContent>
                           </Select>
+                        </TableCell>
+                        <TableCell>
+                          {/* Phase 14 — off = this tier's leaves are never paired (no peer-link). */}
+                          <Checkbox
+                            checked={tier.vpc_pairs}
+                            aria-label="vPC-pair this tier's leaves"
+                            title="vPC-pair this tier's leaves (off = no pairs, no peer-link)"
+                            onCheckedChange={(v) => patchTier(setForm, idx, { vpc_pairs: !!v })}
+                          />
                         </TableCell>
                         <TableCell>
                           <Button
@@ -1000,7 +1010,8 @@ function addTier(setForm: React.Dispatch<React.SetStateAction<RequirementsFile>>
         switch_count: null,
         leaf_model_id: null,
         override_uplink_speed_g: null,
-        server_model_id: null
+        server_model_id: null,
+        vpc_pairs: true
       }
     ]
   }))

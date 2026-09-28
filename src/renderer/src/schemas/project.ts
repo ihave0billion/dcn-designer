@@ -52,7 +52,11 @@ export const TierRowSchema = z.object({
   // Phase 14 — the server model attached to this tier (servers.yaml id).
   // Only the Topology "Show servers" symbol reads it (label = model + NIC
   // speed); null = a generic server labelled with the tier's host speed.
-  server_model_id: z.string().nullable().default(null)
+  server_model_id: z.string().nullable().default(null),
+  // Phase 14 — false = this tier's leaves are never vPC-paired (no
+  // peer-link, no reservation, single-attached hosts). Decision 2026-09-28:
+  // the SITE-A's FX3 management tier is not vPC'd.
+  vpc_pairs: z.boolean().default(true)
 })
 export type TierRow = z.infer<typeof TierRowSchema>
 

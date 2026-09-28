@@ -73,7 +73,7 @@ def norm(name: str) -> str:
     return FAMILY_PREFIX.sub('', name.strip()).upper()
 
 
-COMPACT_PREFIX = re.compile(r'^UCS[CXB]?')
+COMPACT_PREFIX = re.compile(r'^UCS[CXB]?[-\s_]+')
 
 
 def compact(name: str) -> str:
@@ -81,7 +81,7 @@ def compact(name: str) -> str:
     ("UCS-C220-M7" == "UCS C220 M7 Front" == "UCSC-C220-M7 Front"). Mirrors
     resolve-model.ts compactKey."""
     base = re.sub(r'\s+Front$', '', name.strip(), flags=re.I).upper()
-    return COMPACT_PREFIX.sub('', re.sub(r'[^A-Z0-9]', '', base))
+    return re.sub(r'[^A-Z0-9]', '', COMPACT_PREFIX.sub('', base))
 
 
 def slugify(name: str) -> str:

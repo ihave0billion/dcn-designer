@@ -105,7 +105,7 @@ export interface UplinkBudget {
 export function uplinkBudgetAfterPeerLink(
   fabric: Pick<FabricRequest, 'uplinks_per_leaf' | 'uplinks_per_spine'>,
   reserved: number,
-  tierRequests: Array<{ leaf_model_id: string | null; endpoint_count: number | null; switch_count: number | null }>,
+  tierRequests: Array<{ leaf_model_id: string | null; endpoint_count: number | null; switch_count: number | null; vpc_pairs?: boolean }>,
   switches: SwitchSpec[]
 ): UplinkBudget {
   const configured = fabric.uplinks_per_leaf
@@ -117,6 +117,8 @@ export function uplinkBudgetAfterPeerLink(
   const seen = new Set<string>()
   for (const t of tierRequests) {
     if (!t.leaf_model_id) continue
+    // A tier that is not vPC-paired reserves nothing.
+    if (t.vpc_pairs === false) continue
     const active = (t.endpoint_count ?? 0) > 0 || (t.switch_count ?? 0) > 0
     if (!active) continue
     const sw = switches.find((s) => s.id === t.leaf_model_id)
@@ -166,12 +168,13 @@ function leafOrdinal(deviceId: string): number {
 // Decision 2. Leaves are paired in the order the solver numbers them
 // (leaf-1 + leaf-2, leaf-3 + leaf-4, …), never across models or ACI pods.
 // That is exactly placeRacks' pod grouping, so a pair also shares a rack
-// when the inventory allows it.
-export function pairLeaves(rack_layout: RackPlacement[]): PairingResult {
+// when the inventory allows it. Leaves whose model is in `excludedModels`
+// (tiers with `vpc_pairs: false`) are neither paired nor flagged.
+export function pairLeaves(rack_layout: RackPlacement[], excludedModels: ReadonlySet<string> = new Set()): PairingResult {
   const leaves: Array<{ id: string; key: string; ord: number }> = []
   for (const rack of rack_layout) {
     for (const d of rack.devices) {
-      if (d.role !== 'leaf') continue
+      if (d.role !== 'leaf' || excludedModels.has(d.model_id)) continue
       leaves.push({ id: d.device_id, key: `${d.model_id}|${d.pod_index ?? ''}`, ord: leafOrdinal(d.device_id) })
     }
   }
@@ -201,6 +204,7 @@ export function pairLeaves(rack_layout: RackPlacement[]): PairingResult {
 // Convenience for tests / callers that only have tier counts (mirrors the
 // leaf-N numbering of rack.ts).
 export function pairLeavesFromTiers(tiers: TierResult[]): PairingResult {
+  const excluded = new Set(tiers.filter((t) => t.vpc_pairs === false).map((t) => t.leaf_model_id))
   const devices: RackPlacement['devices'] = []
   let serial = 0
   for (const t of tiers) {
@@ -210,5 +214,5 @@ export function pairLeavesFromTiers(tiers: TierResult[]): PairingResult {
       devices.push({ device_id: `leaf-${serial}`, model_id: t.leaf_model_id, role: 'leaf', start_u: 1, ru: 1, label: '', pod_index: null })
     }
   }
-  return pairLeaves([{ rack_name: 'Fabric', size_u: 0, pdu_kw_budget: null, estimated_power_w: 0, devices, over_budget: false }])
+  return pairLeaves([{ rack_name: 'Fabric', size_u: 0, pdu_kw_budget: null, estimated_power_w: 0, devices, over_budget: false }], excluded)
 }

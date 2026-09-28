@@ -195,6 +195,25 @@ describe('solve — vPC', () => {
     expect(d.warnings.some((w) => w.code.startsWith('VPC_'))).toBe(false)
     expect(d.vpc?.pairs.length).toBe(1)
   })
+  it('a tier with vpc_pairs: false is neither paired, flagged, nor reserved against', () => {
+    const d = solve(
+      {
+        ...base,
+        fabric: { ...base.fabric, uplinks_per_leaf: 2, uplinks_per_spine: 1 },
+        tiers: [
+          { ...base.tiers[0], endpoint_count: null, switch_count: 2 },
+          { speed_tier_label: 'mgmt', endpoint_count: null, switch_count: 3, leaf_model_id: FX3.id, override_uplink_speed_g: null, vpc_pairs: false }
+        ]
+      },
+      { ...ctx, switches: [...ALL_SWITCHES, FX3] }
+    )
+    expect(d.vpc?.pairs).toEqual([{ id: 'pair-1', members: ['leaf-1', 'leaf-2'] }])
+    expect(d.vpc?.unpaired).toEqual([])
+    expect(d.warnings.some((w) => w.code === 'VPC_ODD_LEAF')).toBe(false)
+    const reserved = d.warnings.find((w) => w.code === 'VPC_PEER_LINK_RESERVED')!
+    expect(reserved.message).not.toContain('9348GC-FX3')
+    expect(d.tiers[1].vpc_pairs).toBe(false)
+  })
   it('flags the odd leaf on the design', () => {
     const d = solve({ ...base, tiers: [{ ...base.tiers[0], endpoint_count: null, switch_count: 3 }] }, ctx)
     expect(d.vpc?.unpaired).toEqual(['leaf-3'])

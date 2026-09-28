@@ -15,13 +15,17 @@ Interviewed and approved 2026-09-28 (one question at a time); built the same day
   (SE1U → Eth1/49-50 at 400G); if that costs uplinks the solver reduces them and
   warns, exactly as decision 5 says. The library `peer_link_ports` template still
   overrides everything.
+- **Per-tier opt-out (user, 2026-09-28, after seeing the FX3 case): "the FX3 tier will
+  not be vPC'd."** `tiers[].vpc_pairs: false` (Requirements → tier table → vPC checkbox)
+  keeps a tier out of pairing altogether: no pairs, no odd-leaf warning, no peer-link
+  reservation, per-leaf server symbols. The group fallback below stays as a safety net.
 - **UCS masters (decision 10).** The resolver matches server ids by a compact key
   (`UCS-C220-M7` ≡ `UCS C220 M7 Front` ≡ `UCSC-C220-M7 Front`) and
-  `extract-masters.py --servers seed/servers.yaml` extracts them — but cisco.com
-  answered 403 to every scripted download of the UCS pack, so the bundle in
-  production still has no server masters and every server draws as the generic box
-  (reported as a substitution). Download the pack in a browser and re-run the
-  extractor to finish this.
+  `extract-masters.py --servers seed/servers.yaml` extracts them. cisco.com answers
+  403 to curl but serves the packs to a real browser: both packs were downloaded
+  through the laptop's automation Chrome (v1.4.1) and the bundle was rebuilt with the
+  UCS masters (C220 M7 / C240 M7 match; the M8 and AI servers have no master in the
+  2025 pack and draw as the generic box, reported as a substitution).
 
 ## Decisions
 

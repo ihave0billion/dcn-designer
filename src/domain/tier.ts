@@ -74,7 +74,8 @@ function emptyTier(
     host_bw_g: 0,
     uplink_bw_g: 0,
     xor_status: status,
-    server_model_id: req.server_model_id ?? null
+    server_model_id: req.server_model_id ?? null,
+    vpc_pairs: req.vpc_pairs ?? true
   }
 }
 
@@ -191,7 +192,8 @@ export function computeTier(
       host_bw_g,
       uplink_bw_g,
       xor_status: 'ok',
-      server_model_id: req.server_model_id ?? null
+      server_model_id: req.server_model_id ?? null,
+      vpc_pairs: req.vpc_pairs ?? true
     },
     warnings
   }
