@@ -527,6 +527,7 @@ export function BomPage({
               <Text style={[styles.tdBold, { flex: 9.1 }]}>
                 Total transceivers — spine {fmt(opticsBom.by_side.spine)} · leaf {fmt(opticsBom.by_side.leaf)}
                 {opticsBom.by_side.peer_link > 0 ? ` · peer-link ${fmt(opticsBom.by_side.peer_link)}` : ''}
+                {opticsBom.by_side.nd > 0 ? ` · Nexus Dashboard ${fmt(opticsBom.by_side.nd)}` : ''}
                 {opticsBom.by_side.other > 0 ? ` · other ${fmt(opticsBom.by_side.other)}` : ''}
               </Text>
               <Text style={[styles.tdBold, { flex: 0.9 }, styles.right]}>{fmt(opticsBom.total_transceivers)}</Text>

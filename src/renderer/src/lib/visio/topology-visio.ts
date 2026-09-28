@@ -655,7 +655,8 @@ export function buildTopologyDiagram(
       }
       if (e.ports.length > 0 && kind !== 'server' && kind !== 'vpc-peer-link') {
         placePort(e.source, la, collapsePorts(e.ports.map((p) => p.a)), ux, uy)
-        placePort(e.target, lb, collapsePorts(e.ports.map((p) => p.b)), -ux, -uy)
+        // Phase 17 — the OOB cloud is not a device: no port label on that end.
+        if (b.node.role !== 'oob') placePort(e.target, lb, collapsePorts(e.ports.map((p) => p.b)), -ux, -uy)
       }
     }
 

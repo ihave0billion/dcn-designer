@@ -298,6 +298,7 @@ export function SummaryView({
                 {opticsBom.total_transceivers.toLocaleString()} transceivers · spine {opticsBom.by_side.spine} · leaf{' '}
                 {opticsBom.by_side.leaf}
                 {opticsBom.by_side.peer_link > 0 ? ` · peer-link ${opticsBom.by_side.peer_link}` : ''}
+                {opticsBom.by_side.nd > 0 ? ` · Nexus Dashboard ${opticsBom.by_side.nd}` : ''}
                 {opticsBom.integrated_ends > 0 ? ` · ${opticsBom.integrated_ends} DAC/AOC ends` : ''}
               </CardDescription>
             </CardHeader>
