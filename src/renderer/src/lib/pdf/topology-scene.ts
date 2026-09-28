@@ -15,7 +15,8 @@ import type { ServerInfoResolver } from '@/lib/server-symbols'
 
 // Phase 13 — the PDF Topology page(s), built from the SAME scene geometry
 // as the Topology tab and the Visio export (device level, one page per
-// fabric, positions = auto layout overridden by the user's saved drags).
+// fabric, positions = the tab's auto layout overridden by the user's saved
+// drags — the tab's row shape is kept as-is; the report sizes its sheet to it).
 // Pure: numbers in scene pixels, no react-pdf import, unit-testable.
 //
 // A device is drawn as its front panel — the rasterised stencil master or
@@ -105,7 +106,11 @@ export interface PdfSceneOptions {
   ruOf?: (modelId: string) => number | null
   /** Beyond this many device pairs the links are omitted (legibility). */
   maxEdges?: number
-  /** Tiles per row for the automatic layout on paper (the canvas uses 40). */
+  /**
+   * Tiles per row for the automatic layout. Default = the Topology tab's
+   * ROW_MAX, so the page has the same shape as the expanded tab (the report
+   * grows its sheet instead of re-wrapping the rows).
+   */
   rowMax?: number
   /** Phase 14 — draw the Show-servers symbols (topology_layout.yaml show_servers). */
   showServers?: boolean
@@ -117,9 +122,6 @@ export const SERVER_W = 64
 export const SERVER_H = 20
 /** Padding of the pair bracket around its member tiles. */
 export const PAIR_PAD = 6
-
-/** 14 tiles across Letter landscape keeps a 15-char hostname legible under each panel. */
-export const PDF_ROW_MAX = 14
 
 /** Panel width as a fraction of the tile; a 19" chassis at the tile's scale. */
 export const PANEL_W = 110
@@ -167,12 +169,11 @@ export function buildPdfScenePages(
       { kind: 'devices', fabricId: fabric.id },
       { aggregate: true, showServers: opts.showServers, serverInfo: opts.serverInfo }
     )
-    // Saved drag positions win as-is; the automatic layout is re-wrapped for
-    // paper so a wide fabric becomes rows instead of a thin strip.
-    let { positions, custom } = resolveScenePositions(scene, layoutFile, orientation)
-    if (!custom) {
-      positions = resolveScenePositions(scene, null, orientation, { rowMax: opts.rowMax ?? PDF_ROW_MAX }).positions
-    }
+    // Saved drag positions win as-is; otherwise the automatic layout is the
+    // Topology tab's own (same ROW_MAX) — never re-wrapped for paper, so the
+    // page keeps the shape of the expanded tab (v1.6.3: the user rejected
+    // the 14-per-row re-wrap that turned one leaf row into four).
+    const { positions, custom } = resolveScenePositions(scene, layoutFile, orientation, { rowMax: opts.rowMax })
 
     const nodes: PdfSceneNode[] = []
     const counts = { spine: 0, leaf: 0, ipn: 0, server: 0 }

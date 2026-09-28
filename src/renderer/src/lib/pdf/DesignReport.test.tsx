@@ -87,6 +87,15 @@ describe('DesignReport', () => {
     }
     const buf = await renderToBuffer(big)
     expect(buf.subarray(0, 5).toString('latin1')).toBe('%PDF-')
+    // v1.6.3 — the topology page keeps the tab's one-row shape and grows its
+    // sheet past Letter landscape (792 pt) rather than re-wrapping the leaves.
+    const boxes = [...buf.toString('latin1').matchAll(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/g)].map((m) => [
+      Number(m[1]),
+      Number(m[2])
+    ])
+    const wide = boxes.filter(([w]) => w > 792)
+    expect(wide.length).toBeGreaterThanOrEqual(1) // one per fabric page
+    for (const [, h] of wide) expect(h).toBeGreaterThanOrEqual(360)
   }, 30_000)
 })
 

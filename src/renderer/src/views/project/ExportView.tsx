@@ -361,7 +361,8 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
         <CardHeader>
           <CardTitle className="text-base">Export design PDF</CardTitle>
           <CardDescription>
-            A print-ready report of the committed design. Saved into this project&apos;s{' '}
+            A print-ready report of the committed design; its topology page is a wide sheet in the
+            exact shape of the expanded Topology tab. Saved into this project&apos;s{' '}
             <code className="font-mono">exports/</code> folder so it travels with the workspace.
           </CardDescription>
         </CardHeader>

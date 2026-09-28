@@ -789,7 +789,14 @@ function RackPage({
 // Landscape LETTER minus margins.
 const TOPO_W = 792 - PAGE_MARGIN * 2
 // Heading + subtitle above, legend (two rows at most) + note below.
-const TOPO_MAX_H = 612 - PAGE_MARGIN * 2 - 128
+const TOPO_CHROME_H = 128
+const TOPO_MAX_H = 612 - PAGE_MARGIN * 2 - TOPO_CHROME_H
+// v1.6.3 — the topology page keeps the shape of the expanded Topology tab
+// (one leaf row, never re-wrapped). When Letter landscape would shrink a
+// tile below this scale (124 px → ~50 pt, room for a 15-char hostname at
+// 6.5 pt), the SHEET grows instead — a wide custom page, like a plotter
+// sheet — so the drawing stays legible at the tab's own proportions.
+const TOPO_MIN_SCALE = 0.4
 // Tile width in scene px (lib/topology-hierarchy TILE_W) — for the label-legibility rule.
 const PANEL_TILE_W = 124
 // Phase 14 — the skill's peer-link red, shared with the Visio export.
@@ -850,9 +857,18 @@ function TopologyPage({
   // lib/pdf/topology-scene.ts). The scene is laid out in screen pixels and
   // scaled to the page; rasters (front.png of a stencil master, or a product
   // photo) are overlaid as absolutely positioned Images on top of the Svg.
-  const scale = page ? Math.min(TOPO_W / page.width, TOPO_MAX_H / page.height, 1) : 1
+  const fitScale = page ? Math.min(TOPO_W / page.width, TOPO_MAX_H / page.height, 1) : 1
+  const scale = Math.max(fitScale, TOPO_MIN_SCALE)
   const drawW = page ? page.width * scale : 0
   const drawH = page ? page.height * scale : 0
+  // Letter landscape unless the drawing needs more at the minimum scale
+  // ([width, height] in pt — react-pdf would flip an array size under
+  // orientation="landscape", so the sheet is given landscape already).
+  const needW = Math.ceil(drawW + PAGE_MARGIN * 2)
+  const needH = Math.ceil(drawH + PAGE_MARGIN * 2 + TOPO_CHROME_H)
+  // A grown sheet is cut to the drawing (a wide strip, like the tab), not
+  // left half blank under a Letter-height page.
+  const sheet: [number, number] = needW > 792 ? [needW, Math.max(needH, 360)] : [792, Math.max(612, needH)]
   // Labels are drawn at a fixed point size; when a tile is narrower than the
   // shortest hostname we drop them rather than print a smear.
   const labelPt = 6.5
@@ -860,7 +876,7 @@ function TopologyPage({
   const fontPx = labelPt / scale
 
   return (
-    <Page size="LETTER" orientation="landscape" style={styles.page}>
+    <Page size={sheet} style={styles.page}>
       <Text style={styles.h2}>{page ? pdfText(page.title) : 'Topology'}</Text>
       {!page || page.nodes.length === 0 ? (
         <Empty>No topology to draw — generate a design first.</Empty>

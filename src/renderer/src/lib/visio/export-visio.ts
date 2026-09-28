@@ -105,14 +105,6 @@ function modelInfoFrom(switches: Switch[], ipnRouters: IpnRouterFileEntry[], ser
 
 const UNKNOWN_GROUPS: SchematicGroup[] = [{ ports: 32, speedG: 100, kind: 'qsfp' }]
 
-/**
- * Tiles per row on paper when the layout is automatic. The canvas wraps at
- * 40, which at real chassis size (19 in at 1:12) forces a 1:36 sheet; 12 per
- * row keeps 1:12–1:16 on ANSI D so the panels stay readable. A user's saved
- * drag positions are honoured as-is.
- */
-export const VISIO_ROW_MAX = 12
-
 export async function exportTopologyVisio(
   args: ExportTopologyVisioArgs
 ): Promise<ExportTopologyVisioResult> {
@@ -178,10 +170,10 @@ export async function exportTopologyVisio(
       { kind: 'devices', fabricId: fabric.id },
       { aggregate: true, showServers: args.showServers, serverInfo: args.serverInfo }
     )
-    let { positions, custom } = resolveScenePositions(scene, args.layoutFile, orientation)
-    if (!custom) {
-      positions = resolveScenePositions(scene, null, orientation, { rowMax: VISIO_ROW_MAX }).positions
-    }
+    // The tab's own layout (ROW_MAX 40), or the user's saved drags — never
+    // re-wrapped for paper (v1.6.3): the sheet's drawing scale rises instead,
+    // so the drawing keeps the shape of the expanded Topology tab.
+    const { positions, custom } = resolveScenePositions(scene, args.layoutFile, orientation)
     const nodes: TopologyVisioPage['nodes'] = []
     for (const n of scene.nodes) {
       const p = positions.get(n.id) ?? { x: 0, y: 0 }

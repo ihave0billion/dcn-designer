@@ -97,16 +97,19 @@ describe('buildPdfScenePages', () => {
     expect(s.w).toBeCloseTo(95, 5)
   })
 
-  it('wraps a wide automatic layout into rows for paper, but not a custom layout', () => {
+  it('keeps the Topology tab row shape — one leaf row, never re-wrapped for paper', () => {
     const many: TopologyGraph = {
-      nodes: [dev('spine-1', 'spine'), ...Array.from({ length: 24 }, (_, i) => dev(`leaf-${i + 1}`, 'leaf'))],
+      nodes: [dev('spine-1', 'spine'), ...Array.from({ length: 32 }, (_, i) => dev(`leaf-${i + 1}`, 'leaf'))],
       edges: [],
       orphanDeviceIds: []
     }
     const [auto] = buildPdfScenePages(many, 'Acme', null)
-    expect(new Set(auto.nodes.filter((n) => n.role === 'leaf').map((n) => n.y)).size).toBe(2) // 12 + 12
-    const [wide] = buildPdfScenePages(many, 'Acme', null, { rowMax: 40 })
-    expect(new Set(wide.nodes.filter((n) => n.role === 'leaf').map((n) => n.y)).size).toBe(1)
+    const leafRows = new Set(auto.nodes.filter((n) => n.role === 'leaf').map((n) => n.y))
+    expect(leafRows.size).toBe(1) // SITE-A: spines, 32 leaves in one line — as the expanded tab
+    expect(auto.width).toBeGreaterThan(32 * 124)
+    // The tab's own wrap still applies past ROW_MAX (40), and a caller may narrow it.
+    const [narrow] = buildPdfScenePages(many, 'Acme', null, { rowMax: 16 })
+    expect(new Set(narrow.nodes.filter((n) => n.role === 'leaf').map((n) => n.y)).size).toBe(2)
   })
 
   it('rectEdgePoint lands on the rectangle border', () => {
