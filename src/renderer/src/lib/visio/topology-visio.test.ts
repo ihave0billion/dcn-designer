@@ -295,7 +295,7 @@ describe('buildTopologyDiagram', () => {
     expect(page).toContain("<Cell N='LineColor' V='#B85450'/><Cell N='LineWeight' V='0.014'/><Cell N='LinePattern' V='2'/>")
   })
 
-  it('draws a vPC peer-link as a solid red line with its label, and a bracket for a pair without one', () => {
+  it('draws a vPC peer-link as a red port-channel bundle (member lines + oval, no label), and a bracket for a pair without one', () => {
     const diag = new Diagram({ title: 't', creator: 'c' })
     diag.registerMaster(BOX_MASTER)
     const pl: TopologyVisioEdge = { ...edge('leaf-1', 'leaf-2', [{ a: 'Eth1/49', b: 'Eth1/49' }, { a: 'Eth1/50', b: 'Eth1/50' }], '2 × 400G peer-link'), kind: 'vpc-peer-link' }
@@ -316,15 +316,18 @@ describe('buildTopologyDiagram', () => {
     )
     expect(r.problems).toEqual([])
     const page = strFromU8(unzipSync(diag.save())['visio/pages/page1.xml'])
-    // solid red peer-link, heavier than a fabric link
-    expect(page).toContain("<Cell N='LineColor' V='#B85450'/><Cell N='LineWeight' V='0.02'/><Cell N='LinePattern' V='1'/>")
-    expect(page).toContain('2 × 400G peer-link · Eth1/49-50')
-    // no per-end port labels for the peer-link (they would collide between neighbours)
+    // Phase 15 — port-channel symbol: one solid red line per member cable
+    // (two here) plus a red ring (Ellipse geometry) around the middle.
+    expect((page.match(/<Cell N='LineColor' V='#B85450'\/><Cell N='LineWeight' V='0.02'\/><Cell N='LinePattern' V='1'\/><Cell N='FillPattern' V='0'\/><Section N='Geometry' IX='0'><Row T='MoveTo'/g) ?? []).length).toBe(2)
+    expect((page.match(/<Row T='Ellipse'/g) ?? []).length).toBe(1)
+    expect(page).toContain("<Cell N='LineColor' V='#B85450'/><Cell N='LineWeight' V='0.016'/><Cell N='LinePattern' V='1'/><Cell N='FillPattern' V='0'/><Section N='Geometry' IX='0'><Row T='Ellipse'")
+    // no text on the peer-link at all: no bundle label, no per-end port labels
+    expect(page).not.toContain('peer-link ·')
     expect((page.match(/<Text>Eth1\/49-50<\/Text>/g) ?? []).length).toBe(0)
     // dashed red bracket with its label
     expect(page).toContain("<Cell N='LineColor' V='#B85450'/><Cell N='LineWeight' V='0.012'/><Cell N='LinePattern' V='2'/>")
     expect(page).toContain('<Text>vPC pair</Text>')
-    expect(page).toContain('vPC peer-link (leaf ↔ leaf), red')
+    expect(page).toContain('vPC peer-link — port-channel oval across the member cables (leaf ↔ leaf), red')
     expect(page).toContain('vPC pair without a peer-link (bracket)')
   })
 

@@ -124,6 +124,15 @@ export interface LineOptions {
   arrow?: number
 }
 
+export interface EllipseOptions {
+  color?: string
+  /** Paper inches; 0.014 = 1pt. */
+  weight?: number
+  pattern?: number
+  /** Rotation in radians (Visio Angle cell). */
+  angle?: number
+}
+
 export interface ImageSource {
   bytes: Uint8Array
   kind: 'png' | 'jpeg'
@@ -518,6 +527,35 @@ export class Diagram {
         `<Text>${esc(s)}</Text></Shape>`
     )
     return { id: sid, kind: 'text', x0: x - w / 2, y0: y - h / 2, x1: x + w / 2, y1: y + h / 2 }
+  }
+
+  /**
+   * Outline ellipse centred at (x, y), radii rx (along the shape's x axis)
+   * and ry, rotated by `angle` radians — the port-channel ring around a
+   * peer-link bundle. No fill, no text.
+   */
+  ellipse(sink: ShapeSink, x: number, y: number, rx: number, ry: number, opts: EllipseOptions = {}): ShapeRef {
+    const page = sink.page
+    const sid = page.nid()
+    const w = 2 * rx
+    const h = 2 * ry
+    sink.shapes.push(
+      `<Shape ID='${sid}' Type='Shape' LineStyle='0' FillStyle='0' TextStyle='0'>` +
+        `<Cell N='PinX' V='${num(x)}'/><Cell N='PinY' V='${num(y)}'/>` +
+        `<Cell N='Width' V='${num(w)}'/><Cell N='Height' V='${num(h)}'/>` +
+        `<Cell N='LocPinX' V='${num(rx)}'/><Cell N='LocPinY' V='${num(ry)}'/>` +
+        `<Cell N='Angle' V='${num(opts.angle ?? 0)}'/>` +
+        `<Cell N='LineColor' V='${opts.color ?? '#000000'}'/><Cell N='LineWeight' V='${num(opts.weight ?? 0.014)}'/>` +
+        `<Cell N='LinePattern' V='${opts.pattern ?? 1}'/><Cell N='FillPattern' V='0'/>` +
+        `<Section N='Geometry' IX='0'>` +
+        `<Row T='Ellipse' IX='1'>` +
+        `<Cell N='X' V='${num(rx)}'/><Cell N='Y' V='${num(ry)}'/>` +
+        `<Cell N='A' V='${num(w)}'/><Cell N='B' V='${num(ry)}'/>` +
+        `<Cell N='C' V='${num(rx)}'/><Cell N='D' V='${num(h)}'/>` +
+        `</Row></Section></Shape>`
+    )
+    const r = Math.max(rx, ry)
+    return { id: sid, kind: 'box', x0: x - r, y0: y - r, x1: x + r, y1: y + r }
   }
 
   /** 1-D line from (x1,y1) to (x2,y2) in drawing inches. */

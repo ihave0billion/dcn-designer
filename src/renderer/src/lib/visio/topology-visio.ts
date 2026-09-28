@@ -23,6 +23,7 @@
 // module imports through the `@/` alias, which the Node smoke script
 // cannot resolve. Keep them in sync (a test guards the values).
 
+import { bundleGeometry } from '@/lib/port-channel-symbol'
 import { buildSchematicPanel, type SchematicPortGroup } from './schematic-panel'
 import {
   Diagram,
@@ -533,11 +534,25 @@ export function buildTopologyDiagram(
       const kind = edgeKindOf(e, a, b)
       if (kind === 'vpc-peer-link') peerLinksDrawn += 1
       if (kind === 'server') serverLinesDrawn += 1
-      diag.line(page, la.x, la.y, lb.x, lb.y, {
-        color: kind === 'ipn' ? COLOR_IPN : kind === 'vpc-peer-link' ? COLOR_PEER_LINK : kind === 'server' ? COLOR_SERVER : COLOR_FABRIC,
-        weight: kind === 'vpc-peer-link' ? 0.02 : kind === 'server' ? 0.01 : 0.014,
-        pattern: kind === 'ipn' ? 2 : 1
-      })
+      if (kind === 'vpc-peer-link') {
+        // Phase 15 — port-channel symbol: one straight line per member cable
+        // and the Cisco oval across the middle of the bundle (no text). Visio's y axis points
+        // up, so the geometry helper's "down" normal is simply mirrored — the
+        // lines and ring are symmetric about the axis anyway.
+        const g = bundleGeometry({ x: la.x, y: la.y }, { x: lb.x, y: lb.y }, Math.max(1, e.count), {
+          gap: 0.05 * k,
+          ringRx: 0.06 * k,
+          ringPad: 0.09 * k
+        })
+        for (const [p, q] of g.lines) diag.line(page, p.x, p.y, q.x, q.y, { color: COLOR_PEER_LINK, weight: 0.02, pattern: 1 })
+        diag.ellipse(page, g.mid.x, g.mid.y, g.rx, g.ry, { color: COLOR_PEER_LINK, weight: 0.016, angle: (g.angleDeg * Math.PI) / 180 })
+      } else {
+        diag.line(page, la.x, la.y, lb.x, lb.y, {
+          color: kind === 'ipn' ? COLOR_IPN : kind === 'server' ? COLOR_SERVER : COLOR_FABRIC,
+          weight: kind === 'server' ? 0.01 : 0.014,
+          pattern: kind === 'ipn' ? 2 : 1
+        })
+      }
       if (!pointTouchesRect(la.x, la.y, a.rect) || !pointTouchesRect(lb.x, lb.y, b.rect)) {
         pageProblems.push(`link ${e.id}: endpoint does not touch a device panel`)
       }
@@ -549,22 +564,16 @@ export function buildTopologyDiagram(
       const nx = -uy
       const ny = ux
 
-      // Peer-link bundles are always labelled (they are few) and carry their
-      // ports in that one label — two per-end labels would collide in the
-      // gap between neighbouring leaves; server lines are never labelled
-      // (decision 8).
-      let label = e.label
-      if (kind === 'vpc-peer-link' && e.ports.length > 0) {
-        const pa = collapsePorts(e.ports.map((p) => p.a))
-        const pb = collapsePorts(e.ports.map((p) => p.b))
-        label = `${label} · ${pa === pb ? pa : `${pa} ↔ ${pb}`}`
-      }
-      if (kind !== 'server' && label && (drawEdgeLabels || kind === 'vpc-peer-link')) {
+      // Peer-links carry no text at all (Phase 15: the port-channel oval is
+      // the symbol; ports are in the cable BOM); server lines are never
+      // labelled (decision 8).
+      const label = e.label
+      if (kind !== 'server' && kind !== 'vpc-peer-link' && label && drawEdgeLabels) {
         const lh = diag.textHeight(page, label, 6)
         const lw = textWidthIn(label, 6, k) + 0.5 * k
         diag.text(page, la.x + dx * 0.5 + nx * 0.12 * k, la.y + dy * 0.5 + ny * 0.12 * k, lw, lh, label, {
           fontPt: 6,
-          color: kind === 'vpc-peer-link' ? COLOR_PEER_LINK : COLOR_FABRIC
+          color: COLOR_FABRIC
         })
       }
 
@@ -653,7 +662,7 @@ export function buildTopologyDiagram(
     const rows: Array<[string, string, number]> = [
       [uniformEdgeLabel ? `Fabric link (spine ↔ leaf) — every link ${uniformEdgeLabel}` : 'Fabric link (spine ↔ leaf); label = links × speed', COLOR_FABRIC, 1],
       ['Inter-pod link (IPN), dashed', COLOR_IPN, 2],
-      ...(peerLinksDrawn ? ([['vPC peer-link (leaf ↔ leaf), red', COLOR_PEER_LINK, 1]] as Array<[string, string, number]>) : []),
+      ...(peerLinksDrawn ? ([['vPC peer-link — port-channel oval across the member cables (leaf ↔ leaf), red', COLOR_PEER_LINK, 1]] as Array<[string, string, number]>) : []),
       ...(bracketsDrawn ? ([['vPC pair without a peer-link (bracket)', COLOR_PEER_LINK, 2]] as Array<[string, string, number]>) : []),
       ...(serverLinesDrawn ? ([['Server NIC (one line per NIC; symbol per leaf or per vPC pair)', COLOR_SERVER, 1]] as Array<[string, string, number]>) : []),
       ...(smartMark ? ([['Purple mark on a panel = smart switch (DPU)', '#7030A0', 1]] as Array<[string, string, number]>) : [])

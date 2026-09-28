@@ -63,6 +63,7 @@ import {
 import type { Server } from '@/schemas/servers'
 import type { LeafPair } from '@/schemas/leaf-pairs'
 import { serverInfoResolver } from '@/lib/server-symbols'
+import { bundleGeometry, bundlePath, peerLinkEndpoints, type BundleGeometry } from '@/lib/port-channel-symbol'
 import {
   TOPOLOGY_LAYOUT_GENERATOR,
   type TopologyLayoutFile,
@@ -129,6 +130,9 @@ interface BracketData extends Record<string, unknown> {
 }
 type BracketNode = RFNode<BracketData, 'bracket'>
 type CanvasNode = TileNode | BracketNode
+
+/** Sideways distance between the member lines of a peer-link bundle. */
+const PEER_LINK_GAP = 5
 
 /** The skill's peer-link red, shared with the PDF and Visio exports. */
 const PEER_LINK_COLOR = '#B85450'
@@ -931,7 +935,8 @@ function RouterGlyph() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Edges — bezier, fanned when several cables share a pair
+// Edges — bezier, fanned when several cables share a pair; peer-links are
+// straight port-channel bundles (Phase 15); server NIC lines are straight.
 // ────────────────────────────────────────────────────────────────────
 
 function FanEdgeRenderer({
@@ -955,24 +960,38 @@ function FanEdgeRenderer({
   let path: string
   let lx: number
   let ly: number
+  // Phase 15 — the peer-link is the port-channel symbol and nothing else: the
+  // member cables as straight parallel lines between the facing sides of the
+  // two leaf tiles and the Cisco oval across their middle. No text box — the
+  // oval implies the peer-link (the inspector has the count and ports).
+  // Aggregated, one edge carries `count` cables; per-cable, each sibling edge
+  // draws one line and the first also draws the oval sized for all of them.
+  let ring: BundleGeometry | null = null
   if (kind === 'vpc-peer-link') {
-    // Phase 14 — both ends are leaves on the same row, so the source's bottom
-    // handle and the target's top handle would run the cable straight through
-    // the tiles. Arc it under (right of, when horizontal) both tiles instead,
-    // ending on the target's far edge; the label sits at the bottom of the arc.
-    const box = 56 // icon tile size (size-14) — the handles sit on its edges
-    const dip = 58 + off
-    if (!horizontal) {
-      const ty = targetY + box
-      path = `M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + dip}, ${targetX} ${ty + dip}, ${targetX} ${ty}`
-      lx = (sourceX + targetX) / 2
-      ly = (sourceY + ty) / 2 + dip * 0.75
-    } else {
-      const tx = targetX + box
-      path = `M ${sourceX} ${sourceY} C ${sourceX + dip} ${sourceY}, ${tx + dip} ${targetY}, ${tx} ${targetY}`
-      lx = (sourceX + tx) / 2 + dip * 0.75
-      ly = (sourceY + targetY) / 2
-    }
+    const [a, b] = peerLinkEndpoints({ sourceX, sourceY, targetX, targetY }, horizontal, 56)
+    const g = bundleGeometry(a, b, count, {
+      gap: PEER_LINK_GAP,
+      offset: (index - (siblings - 1) / 2) * PEER_LINK_GAP,
+      ringLines: count * siblings,
+      ringRx: 6,
+      ringPad: 9
+    })
+    path = bundlePath(g)
+    if (index === 0) ring = g
+    lx = g.mid.x
+    ly = g.mid.y
+  } else if (kind === 'server') {
+    // Phase 15 — one straight line per NIC, landing on its own spot along the
+    // server tile's edge so a dual-attached symbol reads as a clear V (both
+    // curves used to land on the same handle and looked like one line at
+    // fit-view zoom). Dual: the leaf on the left lands left, the leaf on the
+    // right lands right; single-attached NICs fan across the edge.
+    const spread = siblings > 1 ? (index - (siblings - 1) / 2) * 8 : Math.max(-14, Math.min(14, horizontal ? sourceY - targetY : sourceX - targetX))
+    const tx = horizontal ? targetX : targetX + spread
+    const ty = horizontal ? targetY + spread : targetY
+    path = `M ${sourceX} ${sourceY} L ${tx} ${ty}`
+    lx = (sourceX + tx) / 2
+    ly = (sourceY + ty) / 2
   } else if (siblings <= 1) {
     ;[path, lx, ly] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
   } else if (!horizontal) {
@@ -986,8 +1005,9 @@ function FanEdgeRenderer({
     lx = mx
     ly = (sourceY + targetY) / 2 + off * 0.75
   }
-  const width = kind === 'server' ? 1 : Math.min(1.5 + (count - 1) * 0.35, 6) + (kind === 'vpc-peer-link' ? 1 : 0)
-  const showLabel = selected || (data?.showLabel ?? false) || kind === 'vpc-peer-link'
+  const width = kind === 'server' ? 1 : kind === 'vpc-peer-link' ? 2 : Math.min(1.5 + (count - 1) * 0.35, 6)
+  // Peer-links never carry a label box (decision: the oval says it all).
+  const showLabel = kind !== 'vpc-peer-link' && (selected || (data?.showLabel ?? false))
   const stroke = selected
     ? 'var(--hot)'
     : kind === 'vpc-peer-link'
@@ -995,6 +1015,7 @@ function FanEdgeRenderer({
       : kind === 'server'
         ? 'var(--muted-foreground)'
         : 'var(--link)'
+  const labelTransform = `translate(-50%, -50%) translate(${lx}px, ${ly}px)`
   return (
     <>
       <BaseEdge
@@ -1007,14 +1028,27 @@ function FanEdgeRenderer({
           opacity: selected ? 1 : kind === 'server' ? 0.6 : 0.85
         }}
       />
+      {ring && (
+        <ellipse
+          cx={ring.mid.x}
+          cy={ring.mid.y}
+          rx={ring.rx}
+          ry={ring.ry}
+          transform={`rotate(${ring.angleDeg} ${ring.mid.x} ${ring.mid.y})`}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={selected ? 2.5 : 1.75}
+          style={{ opacity: selected ? 1 : 0.9 }}
+          pointerEvents="none"
+        />
+      )}
       {showLabel && (
         <EdgeLabelRenderer>
           <div
             className={cn(
-              'absolute pointer-events-none border bg-card px-1.5 py-0.5 text-[10px] font-mono font-semibold chamfer-xs nodrag nopan',
-              kind === 'vpc-peer-link' ? 'border-[#B85450]/60 text-[#B85450]' : 'border-link/50 text-link'
+              'absolute pointer-events-none border border-link/50 bg-card px-1.5 py-0.5 text-[10px] font-mono font-semibold text-link chamfer-xs nodrag nopan'
             )}
-            style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}
+            style={{ transform: labelTransform }}
           >
             {data?.scene.label}
           </div>
@@ -1538,7 +1572,13 @@ function LegendPane({ onClose }: { onClose(): void }) {
         <ul className="space-y-2 text-sm">
           <li className="flex items-center gap-2"><span className="w-8 border-t-2 border-link" /> One cable</li>
           <li className="flex items-center gap-2"><span className="w-8 border-t-4 border-link" /> Aggregated cables (label shows count × speed)</li>
-          <li className="flex items-center gap-2"><span className="w-8 border-t-[3px]" style={{ borderColor: PEER_LINK_COLOR }} /> vPC peer-link (leaf ↔ leaf)</li>
+          <li className="flex items-center gap-2">
+            <svg width="32" height="14" viewBox="0 0 32 14" aria-hidden="true">
+              <path d="M 0 4.5 L 32 4.5 M 0 9.5 L 32 9.5" stroke={PEER_LINK_COLOR} strokeWidth="1.75" fill="none" />
+              <ellipse cx="16" cy="7" rx="3.5" ry="6.5" stroke={PEER_LINK_COLOR} strokeWidth="1.25" fill="none" />
+            </svg>
+            vPC peer-link — port-channel oval across the member cables (leaf ↔ leaf), no label
+          </li>
           <li className="flex items-center gap-2"><span className="w-8 border-t border-muted-foreground" /> Server NIC (one line per NIC)</li>
           <li className="flex items-center gap-2"><span className="w-8 border-t-2 border-hot" /> Selected</li>
         </ul>

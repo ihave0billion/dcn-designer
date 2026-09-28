@@ -79,6 +79,7 @@ describe('Diagram package', () => {
     diag.drop(page, EMF_MASTER.name, 150, 100, { label: 'spine-1', labelPos: 'above' })
     diag.line(page, 50, 99.15, 150, 99, { color: '#0070C0', weight: 0.014, label: '4 × 100G' })
     diag.box(page, 100, 20, 40, 10, { text: 'Legend', align: 'left' })
+    diag.ellipse(page, 100, 99.075, 3, 1.5, { color: '#B85450', weight: 0.012, angle: 0.25 })
     diag.image(page, { bytes: PNG_1X1, kind: 'png' }, 100, 60, { w: 19, label: 'photo' })
     diag.image(page, { bytes: PNG_1X1, kind: 'png' }, 120, 60, { w: 10 }) // same bytes → same media part
     diag.addPage('Second', 204, 132)
@@ -197,6 +198,23 @@ describe('Diagram package', () => {
     expect(cell(page, id, 'LineWeight')).toBe('0.014')
     expect(Number(cell(page, id, 'Width'))).toBeCloseTo(Math.hypot(100, 0.15), 4)
     expect(page).toContain('<Text>4 × 100G</Text>')
+  })
+
+  it('writes a rotated outline ellipse (Phase 15 port-channel ring)', () => {
+    const { parts } = build()
+    const page = parts['visio/pages/page1.xml'] as string
+    const m = /<Shape ID='(\d+)'[^>]*>(?:(?!<\/Shape>)[\s\S])*?<Row T='Ellipse'/.exec(page)
+    expect(m).not.toBeNull()
+    const id = Number(m![1])
+    expect(cell(page, id, 'PinX')).toBe('100')
+    expect(cell(page, id, 'PinY')).toBe('99.075')
+    expect(cell(page, id, 'Width')).toBe('6')
+    expect(cell(page, id, 'Height')).toBe('3')
+    expect(cell(page, id, 'Angle')).toBe('0.25')
+    expect(cell(page, id, 'LineColor')).toBe('#B85450')
+    expect(cell(page, id, 'FillPattern')).toBe('0')
+    // Ellipse row: centre (X,Y), a point on the x axis (A,B), a point on the y axis (C,D), in local coordinates
+    expect(page).toContain("<Row T='Ellipse' IX='1'><Cell N='X' V='3'/><Cell N='Y' V='1.5'/><Cell N='A' V='6'/><Cell N='B' V='1.5'/><Cell N='C' V='3'/><Cell N='D' V='3'/></Row>")
   })
 
   it('places bitmaps as Foreign shapes with one media part per distinct image', () => {

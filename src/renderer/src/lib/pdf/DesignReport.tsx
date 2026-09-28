@@ -1,4 +1,4 @@
-import { Document, Page, View, Text, Image, Svg, Rect, Line, type DocumentProps } from '@react-pdf/renderer'
+import { Document, Page, View, Text, Image, Svg, Rect, Line, Path, type DocumentProps } from '@react-pdf/renderer'
 import type { ReactElement } from 'react'
 import type { DesignResult, OpticsBomScenario, SolverWarning } from '@domain'
 import { DEFAULT_SWITCH_POWER_W } from '@domain'
@@ -13,6 +13,7 @@ import { buildDeviceBom, type DeviceBom } from '@/lib/device-bom'
 import { findCandidate } from '@/lib/design-projection'
 import type { TopologyLayoutFile } from '@/schemas/topology-layout'
 import { buildPdfScenePages, type PdfScenePage } from './topology-scene'
+import { bundleGeometry, bundlePath } from '@/lib/port-channel-symbol'
 import type { PanelImages } from './panel-images'
 import { COLORS, PAGE_MARGIN, styles } from './styles'
 import { pdfText } from './text'
@@ -685,6 +686,50 @@ const PANEL_TILE_W = 124
 // Phase 14 — the skill's peer-link red, shared with the Visio export.
 const PEER_LINK_COLOR = '#B85450'
 
+/**
+ * Phase 15 — a vPC peer-link drawn as a port-channel: `count` straight
+ * parallel member lines between the two leaf panels and the Cisco oval across
+ * their middle (tall, centred on the bundle, no text). Sizes are in scene px (panels are 110 wide); the ring is an arc
+ * path so no transform support is needed from the PDF renderer.
+ */
+function PeerLinkBundle({
+  x1,
+  y1,
+  x2,
+  y2,
+  count,
+  scale
+}: {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  count: number
+  scale: number
+}): ReactElement {
+  // Sized in printed points (÷ scale → scene px) with a scene-px floor, so a
+  // 32-leaf page shrunk to 1:6 still prints a legible glyph and a 4-leaf
+  // page does not get a giant one.
+  const pt = (v: number, floor: number): number => Math.max(floor, v / scale)
+  const g = bundleGeometry({ x: x1, y: y1 }, { x: x2, y: y2 }, count, {
+    gap: pt(1.4, 2.4),
+    ringRx: pt(1.1, 2.6),
+    ringPad: pt(1.6, 3)
+  })
+  const ang = (g.angleDeg * Math.PI) / 180
+  const ux = Math.cos(ang)
+  const uy = Math.sin(ang)
+  const p1 = { x: g.mid.x - ux * g.rx, y: g.mid.y - uy * g.rx }
+  const p2 = { x: g.mid.x + ux * g.rx, y: g.mid.y + uy * g.rx }
+  const ring = `M ${p1.x} ${p1.y} A ${g.rx} ${g.ry} ${g.angleDeg} 1 0 ${p2.x} ${p2.y} A ${g.rx} ${g.ry} ${g.angleDeg} 1 0 ${p1.x} ${p1.y}`
+  return (
+    <>
+      <Path d={bundlePath(g)} stroke={PEER_LINK_COLOR} strokeWidth={pt(0.5, 0.6)} fill="none" />
+      <Path d={ring} stroke={PEER_LINK_COLOR} strokeWidth={pt(0.4, 0.5)} fill="none" />
+    </>
+  )
+}
+
 function TopologyPage({
   projectName,
   page
@@ -733,24 +778,25 @@ function TopologyPage({
                   strokeDasharray="3 2"
                 />
               ))}
-              {page.edges.map((e) => (
-                <Line
-                  key={e.id}
-                  x1={e.x1}
-                  y1={e.y1}
-                  x2={e.x2}
-                  y2={e.y2}
-                  stroke={e.kind === 'vpc-peer-link' ? PEER_LINK_COLOR : COLORS.faint}
-                  strokeWidth={
-                    e.kind === 'vpc-peer-link'
-                      ? Math.max(1.2, 1.2 / scale)
-                      : e.kind === 'server'
-                        ? Math.max(0.4, 0.35 / scale)
-                        : Math.max(0.6, 0.5 / scale)
-                  }
-                  strokeDasharray={e.dashed ? '4 3' : undefined}
-                />
-              ))}
+              {page.edges.map((e) =>
+                e.kind === 'vpc-peer-link' ? (
+                  // Phase 15 — port-channel symbol: member cables as parallel
+                  // lines with a ring around their middle (same helper as the
+                  // screen and the Visio export).
+                  <PeerLinkBundle key={e.id} x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2} count={e.count} scale={scale} />
+                ) : (
+                  <Line
+                    key={e.id}
+                    x1={e.x1}
+                    y1={e.y1}
+                    x2={e.x2}
+                    y2={e.y2}
+                    stroke={COLORS.faint}
+                    strokeWidth={e.kind === 'server' ? Math.max(0.4, 0.35 / scale) : Math.max(0.6, 0.5 / scale)}
+                    strokeDasharray={e.dashed ? '4 3' : undefined}
+                  />
+                )
+              )}
               {page.nodes.map((n) =>
                 n.image ? null : (
                   <Rect
@@ -808,7 +854,7 @@ function TopologyPage({
             {page.peerLinks > 0 ? (
               <View style={styles.legendItem}>
                 <View style={[styles.legendSwatch, { backgroundColor: PEER_LINK_COLOR }]} />
-                <Text style={styles.legendLabel}>vPC peer-link ({page.peerLinks})</Text>
+                <Text style={styles.legendLabel}>vPC peer-link — port-channel oval across the member cables ({page.peerLinks})</Text>
               </View>
             ) : null}
             {page.pairs.length > 0 ? (
