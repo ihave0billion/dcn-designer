@@ -262,6 +262,7 @@ export function NewLinkDialog({
     const length_m_n = lengthM.trim() === '' ? null : Number(lengthM)
     const link: CableLink = {
       id: editingLinkId ?? initialDraft?.id ?? nextLinkId(existingLinks),
+      kind: initialDraft?.kind ?? 'uplink',
       device_a: {
         rack: spineDevice?.rack ?? null,
         device_id: spineDeviceId,

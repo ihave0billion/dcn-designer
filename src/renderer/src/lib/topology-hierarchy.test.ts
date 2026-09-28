@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { TopologyGraph, TopologyNode, TopologyEdge } from './topology-extractor'
+import type { SceneNode } from './topology-hierarchy'
 import {
   buildFabrics,
   buildScene,
@@ -37,9 +38,10 @@ function dev(
   }
 }
 
-function link(id: string, a: string, b: string, speed = 400): TopologyEdge {
+function link(id: string, a: string, b: string, speed = 400, kind: TopologyEdge['kind'] = 'uplink'): TopologyEdge {
   return {
     id,
+    kind,
     source: a,
     sourcePort: 'Eth1/1',
     target: b,
@@ -279,5 +281,138 @@ describe('edgeLabel', () => {
     expect(edgeLabel({ count: 1, speeds: [400], totalG: 400 })).toBe('400G')
     expect(edgeLabel({ count: 4, speeds: [400], totalG: 1600 })).toBe('4 × 400G')
     expect(edgeLabel({ count: 3, speeds: [400, 100], totalG: 900 })).toBe('3 links · 900G')
+  })
+})
+
+// ── Phase 14: vPC pairs + servers ────────────────────────────────────
+
+// 2 spines, 3 leaves; leaf-1 + leaf-2 are a vPC pair with a 2×400G peer-link.
+function pairedPod(withPeerLink = true): TopologyGraph {
+  const g = singlePod()
+  g.nodes = g.nodes.map((n) =>
+    n.id === 'leaf-1' || n.id === 'leaf-2'
+      ? { ...n, pair_id: 'pair-1', pair_peer: n.id === 'leaf-1' ? 'leaf-2' : 'leaf-1' }
+      : n
+  )
+  g.pairs = [{ id: 'pair-1', members: ['leaf-1', 'leaf-2'] }]
+  if (withPeerLink) {
+    g.edges.push(link('pl-1', 'leaf-1', 'leaf-2', 400, 'vpc-peer-link'))
+    g.edges.push(link('pl-2', 'leaf-1', 'leaf-2', 400, 'vpc-peer-link'))
+  }
+  return g
+}
+
+const serverInfo = (leaf: { model_id: string }) =>
+  leaf.model_id === 'N9K-LEAF'
+    ? { model_id: 'UCS-C220-M7', label: 'UCS C220 M7', nics: 2, nic_speed_g: 25, ru: 1 }
+    : null
+
+describe('buildScene — vPC pairs (Phase 14)', () => {
+  it('device level: the peer-link is its own red edge, aggregated as one 2 × 400G bundle', () => {
+    const g = pairedPod()
+    const scene = buildScene(g, buildFabrics(g, 'F'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true })
+    const pl = scene.edges.filter((e) => e.kind === 'vpc-peer-link')
+    expect(pl).toHaveLength(1)
+    expect(pl[0]).toMatchObject({ source: 'leaf-1', target: 'leaf-2', count: 2, label: '2 × 400G peer-link' })
+    expect(scene.edges.filter((e) => e.kind === 'fabric')).toHaveLength(6)
+    // The pair is listed; with a peer-link drawn it needs no bracket.
+    expect(scene.pairs).toEqual([{ id: 'pair-1', memberIds: ['leaf-1', 'leaf-2'], label: 'vPC pair', bracket: false }])
+  })
+
+  it('fabric / fabrics levels fold the peer-link away (both ends land on the same tile)', () => {
+    const g = pairedPod()
+    const f = buildFabrics(g, 'F')
+    expect(buildScene(g, f, { kind: 'fabric', fabricId: 'fabric' }, { aggregate: true }).edges.every((e) => e.kind === 'fabric')).toBe(true)
+    expect(buildScene(g, f, { kind: 'fabrics' }, { aggregate: true }).edges).toEqual([])
+    expect(buildScene(g, f, { kind: 'fabric', fabricId: 'fabric' }, { aggregate: true }).pairs).toEqual([])
+  })
+
+  it('ACI-style pair (no peer-link) gets a bracket instead', () => {
+    const g = pairedPod(false)
+    const scene = buildScene(g, buildFabrics(g, 'F'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true })
+    expect(scene.edges.some((e) => e.kind === 'vpc-peer-link')).toBe(false)
+    expect(scene.pairs[0].bracket).toBe(true)
+  })
+
+  it('per-cable mode keeps each peer-link cable as its own edge', () => {
+    const g = pairedPod()
+    const scene = buildScene(g, buildFabrics(g, 'F'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: false })
+    expect(scene.edges.filter((e) => e.kind === 'vpc-peer-link')).toHaveLength(2)
+  })
+})
+
+describe('buildScene — server symbols (Phase 14)', () => {
+  it('off by default: no server tiles', () => {
+    const g = pairedPod()
+    const scene = buildScene(g, buildFabrics(g, 'F'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true, serverInfo })
+    expect(scene.nodes.some((n) => n.kind === 'server')).toBe(false)
+  })
+
+  it('one symbol per pair (two lines, one per leaf) and one per unpaired leaf (one line per NIC)', () => {
+    const g = pairedPod()
+    const scene = buildScene(g, buildFabrics(g, 'F'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true, showServers: true, serverInfo })
+    const servers = scene.nodes.filter((n) => n.kind === 'server')
+    expect(servers.map((n) => n.id).sort()).toEqual(['server:leaf-10', 'server:pair-1'])
+    const pairSym = servers.find((n) => n.id === 'server:pair-1')!
+    expect(pairSym).toMatchObject({ label: 'UCS C220 M7', sublabel: '2×25G', tier: 3, memberIds: ['leaf-1', 'leaf-2'] })
+    expect(pairSym.server).toMatchObject({ dual: true, modelId: 'UCS-C220-M7', nicSpeedG: 25 })
+    const single = servers.find((n) => n.id === 'server:leaf-10')!
+    expect(single.server?.dual).toBe(false)
+    const lines = scene.edges.filter((e) => e.kind === 'server')
+    // pair: leaf-1 + leaf-2 → symbol; single leaf-10: 2 NICs → 2 lines
+    expect(lines.filter((e) => e.target === 'server:pair-1').map((e) => e.source).sort()).toEqual(['leaf-1', 'leaf-2'])
+    expect(lines.filter((e) => e.target === 'server:leaf-10')).toHaveLength(2)
+    expect(lines.every((e) => e.label === '25G' && e.count === 1)).toBe(true)
+  })
+
+  it('generic symbol when the tier has no server model', () => {
+    const g = pairedPod()
+    const generic = () => ({ model_id: null, label: 'Servers', nics: 1, nic_speed_g: 25, ru: 1 })
+    const scene = buildScene(g, buildFabrics(g, 'F'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true, showServers: true, serverInfo: generic })
+    const sym = scene.nodes.find((n) => n.id === 'server:leaf-10')!
+    expect(sym).toMatchObject({ label: 'Servers', sublabel: '25G NIC' })
+    expect(scene.edges.filter((e) => e.target === 'server:leaf-10')).toHaveLength(1)
+  })
+
+  it('layout centres a server symbol under its leaves, one tier below them', () => {
+    const g = pairedPod()
+    const scene = buildScene(g, buildFabrics(g, 'F'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true, showServers: true, serverInfo })
+    const pos = layoutScene(scene.nodes)
+    const l1 = pos.get('leaf-1')!
+    const l2 = pos.get('leaf-2')!
+    expect(pos.get('server:pair-1')).toEqual({ x: (l1.x + l2.x) / 2, y: l1.y + TILE_H + TIER_GAP })
+    expect(pos.get('server:leaf-10')).toEqual({ x: pos.get('leaf-10')!.x, y: l1.y + TILE_H + TIER_GAP })
+  })
+
+  it('wrapped leaf rows each get their own server slot, so symbols never land on the next row', () => {
+    const g = pairedPod()
+    const scene = buildScene(g, buildFabrics(g, 'F'), { kind: 'devices', fabricId: 'fabric' }, { aggregate: true, showServers: true, serverInfo })
+    // wrap at 2 → leaf rows [leaf-1, leaf-2] and [leaf-10]; each has servers
+    const pos = layoutScene(scene.nodes, 'vertical', 2)
+    const y = (id: string) => pos.get(id)!.y
+    expect(y('server:pair-1')).toBe(y('leaf-1') + TILE_H + TIER_GAP)
+    expect(y('leaf-10')).toBe(y('server:pair-1') + TILE_H + TIER_GAP)
+    expect(y('server:leaf-10')).toBe(y('leaf-10') + TILE_H + TIER_GAP)
+  })
+
+  it('a vPC pair never straddles a row break when a tier wraps', () => {
+    // 6 paired leaves + 1 odd, wrap at 3 → rows [1,2], [3,4], [5,6,7]: a pair is never split
+    const tile = (i: number): SceneNode => ({
+      id: `leaf-${i}`,
+      kind: 'device',
+      label: `leaf-${i}`,
+      sublabel: null,
+      role: 'leaf',
+      memberIds: [`leaf-${i}`],
+      count: 1,
+      status: 'healthy',
+      fabricId: 'f',
+      device: { ...dev(`leaf-${i}`, 'leaf'), pair_id: i <= 6 ? `pair-${Math.ceil(i / 2)}` : null },
+      tier: 2
+    })
+    const nodes = [1, 2, 3, 4, 5, 6, 7].map(tile)
+    const pos = layoutScene(nodes, 'vertical', 3)
+    for (const [a, b] of [[1, 2], [3, 4], [5, 6], [6, 7]]) expect(pos.get(`leaf-${a}`)!.y).toBe(pos.get(`leaf-${b}`)!.y)
+    expect(new Set([...pos.values()].map((p) => p.y)).size).toBe(3)
   })
 })

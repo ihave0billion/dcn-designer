@@ -48,7 +48,11 @@ export const TierRowSchema = z.object({
   endpoint_count: z.number().int().nonnegative().nullable().default(null),
   switch_count: z.number().int().nonnegative().nullable().default(null),
   leaf_model_id: z.string().nullable().default(null),
-  override_uplink_speed_g: z.number().positive().nullable().default(null)
+  override_uplink_speed_g: z.number().positive().nullable().default(null),
+  // Phase 14 — the server model attached to this tier (servers.yaml id).
+  // Only the Topology "Show servers" symbol reads it (label = model + NIC
+  // speed); null = a generic server labelled with the tier's host speed.
+  server_model_id: z.string().nullable().default(null)
 })
 export type TierRow = z.infer<typeof TierRowSchema>
 
@@ -56,10 +60,34 @@ export type TierRow = z.infer<typeof TierRowSchema>
 // Fabric (uplinks + spine selection)
 // ────────────────────────────────────────────────────────────────────
 
+// Phase 14 — fabric mode drives the vPC leaf-pair semantics:
+//   nxos-classic  peer-link + port-channel mandatory
+//   nxos-evpn     peer-link optional (default on), port-channel optional (default on)
+//   aci           no peer-link, no port-channel — pairs are logical only
+// Existing projects (no `mode` in the file) load as nxos-evpn with the
+// peer-link on, which is what the SITE-A smart-switch design needs.
+export const FabricModeSchema = z.enum(['nxos-classic', 'nxos-evpn', 'aci'])
+export type FabricMode = z.infer<typeof FabricModeSchema>
+
+export const PEER_LINK_MEMBERS_MIN = 1
+export const PEER_LINK_MEMBERS_MAX = 4
+
 export const FabricSchema = z.object({
   uplinks_per_leaf: z.number().int().positive().default(4),
   uplinks_per_spine: z.number().int().positive().default(2),
   spine_model_id: z.string().nullable().default(null),
+  mode: FabricModeSchema.default('nxos-evpn'),
+  // EVPN only: draw/seed the vPC peer-link at all (classic forces on, ACI off).
+  peer_link_enabled: z.boolean().default(true),
+  // Cables in the peer-link, at the port's native speed (1–4, default 2).
+  peer_link_members: z
+    .number()
+    .int()
+    .min(PEER_LINK_MEMBERS_MIN)
+    .max(PEER_LINK_MEMBERS_MAX)
+    .default(2),
+  // EVPN only: bundle the peer-link as a port-channel (classic forces on, ACI off).
+  peer_link_port_channel: z.boolean().default(true),
   // ACI Multi-Pod controls (Phase 9b). `aci_multipod_allowed` defaults
   // to true so the candidate matrix is always computed and the user can
   // discover the option; setting false blocks multi-pod candidates.
@@ -119,7 +147,11 @@ export const RequirementsFileSchema = z.object({
   fabric: FabricSchema.default({
     uplinks_per_leaf: 4,
     uplinks_per_spine: 2,
-    spine_model_id: null
+    spine_model_id: null,
+    mode: 'nxos-evpn',
+    peer_link_enabled: true,
+    peer_link_members: 2,
+    peer_link_port_channel: true
   }),
   constraints: ConstraintsSchema.default({
     aci_capable_required: false,
@@ -153,6 +185,10 @@ export function emptyRequirements(project: ProjectMeta): RequirementsFile {
       uplinks_per_leaf: 4,
       uplinks_per_spine: 2,
       spine_model_id: null,
+      mode: 'nxos-evpn',
+      peer_link_enabled: true,
+      peer_link_members: 2,
+      peer_link_port_channel: true,
       aci_multipod_allowed: true,
       ipn_router_model_id: null
     },
@@ -167,4 +203,42 @@ export function emptyRequirements(project: ProjectMeta): RequirementsFile {
     cable_tray_m: null,
     target_oversub_informational: null
   }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Phase 14 — effective vPC settings for a fabric mode. The mode forces
+// the classic / ACI cases; only EVPN honours the two checkboxes.
+// ────────────────────────────────────────────────────────────────────
+
+export interface EffectiveVpc {
+  mode: FabricMode
+  /** True when leaf pairs are wired with a physical peer-link. */
+  peer_link: boolean
+  /** True when that peer-link is bundled as a port-channel. */
+  port_channel: boolean
+  /** Cables in the peer-link (0 when there is no peer-link). */
+  members: number
+}
+
+export function effectiveVpc(fabric: Pick<Fabric, 'mode' | 'peer_link_enabled' | 'peer_link_members' | 'peer_link_port_channel'>): EffectiveVpc {
+  const members = Math.min(PEER_LINK_MEMBERS_MAX, Math.max(PEER_LINK_MEMBERS_MIN, fabric.peer_link_members))
+  switch (fabric.mode) {
+    case 'nxos-classic':
+      return { mode: fabric.mode, peer_link: true, port_channel: true, members }
+    case 'aci':
+      return { mode: fabric.mode, peer_link: false, port_channel: false, members: 0 }
+    default:
+      return {
+        mode: fabric.mode,
+        peer_link: fabric.peer_link_enabled,
+        port_channel: fabric.peer_link_enabled && fabric.peer_link_port_channel,
+        members: fabric.peer_link_enabled ? members : 0
+      }
+  }
+}
+
+export const FABRIC_MODE_LABEL: Record<FabricMode, string> = {
+  'nxos-classic': 'NX-OS classic (vPC)',
+  'nxos-evpn': 'NX-OS VXLAN EVPN',
+  aci: 'ACI'
 }

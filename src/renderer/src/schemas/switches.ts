@@ -61,7 +61,12 @@ export const SwitchSchema = z.object({
   notes: z.string().nullable(),
   data_sheet_url: z.string().nullable(),
   attachments: z.array(z.string()).default([]),
-  visio: VisioHintSchema.optional()
+  visio: VisioHintSchema.optional(),
+  // Phase 14 — port template for the vPC peer-link, e.g. "Eth1/{49..50}".
+  // Null = default rule: the first ports of the highest-speed uplink group
+  // (spine uplinks are then taken from the end of that group). Smart
+  // switches thereby land on their 400G ports, never the 100G secondaries.
+  peer_link_ports: z.string().nullable().default(null)
 })
 export type Switch = z.infer<typeof SwitchSchema>
 

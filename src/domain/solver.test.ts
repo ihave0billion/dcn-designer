@@ -168,7 +168,10 @@ describe('v8 AI_HPC_NonBlocking default (1:1)', () => {
       uplinks_per_spine: 32,
       spine_model_id: 'N9K-C9364C-H1-SPINE',
       use_case: 'ai',
-      input_mode: 'aggregate'
+      input_mode: 'aggregate',
+      // A 1:1 AI fabric spends every leaf port on uplinks — no vPC
+      // peer-link (Phase 14 would otherwise reserve 2 ports and halve it).
+      peer_link_enabled: false
     },
     tiers: [
       {

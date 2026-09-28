@@ -295,6 +295,57 @@ describe('buildTopologyDiagram', () => {
     expect(page).toContain("<Cell N='LineColor' V='#B85450'/><Cell N='LineWeight' V='0.014'/><Cell N='LinePattern' V='2'/>")
   })
 
+  it('draws a vPC peer-link as a solid red line with its label, and a bracket for a pair without one', () => {
+    const diag = new Diagram({ title: 't', creator: 'c' })
+    diag.registerMaster(BOX_MASTER)
+    const pl: TopologyVisioEdge = { ...edge('leaf-1', 'leaf-2', [{ a: 'Eth1/49', b: 'Eth1/49' }, { a: 'Eth1/50', b: 'Eth1/50' }], '2 × 400G peer-link'), kind: 'vpc-peer-link' }
+    const r = buildTopologyDiagram(
+      {
+        ...input([]),
+        pages: [
+          {
+            title: 'V',
+            orientation: 'vertical',
+            nodes: [spine('spine-1', 138), leaf('leaf-1', 0, schematic), leaf('leaf-2', 138, schematic), leaf('leaf-3', 276, schematic), leaf('leaf-4', 414, schematic)],
+            edges: [edge('spine-1', 'leaf-1'), edge('spine-1', 'leaf-2'), pl],
+            pairs: [{ id: 'pair-2', memberIds: ['leaf-3', 'leaf-4'], label: 'vPC pair' }]
+          }
+        ]
+      },
+      diag
+    )
+    expect(r.problems).toEqual([])
+    const page = strFromU8(unzipSync(diag.save())['visio/pages/page1.xml'])
+    // solid red peer-link, heavier than a fabric link
+    expect(page).toContain("<Cell N='LineColor' V='#B85450'/><Cell N='LineWeight' V='0.02'/><Cell N='LinePattern' V='1'/>")
+    expect(page).toContain('2 × 400G peer-link · Eth1/49-50')
+    // no per-end port labels for the peer-link (they would collide between neighbours)
+    expect((page.match(/<Text>Eth1\/49-50<\/Text>/g) ?? []).length).toBe(0)
+    // dashed red bracket with its label
+    expect(page).toContain("<Cell N='LineColor' V='#B85450'/><Cell N='LineWeight' V='0.012'/><Cell N='LinePattern' V='2'/>")
+    expect(page).toContain('<Text>vPC pair</Text>')
+    expect(page).toContain('vPC peer-link (leaf ↔ leaf), red')
+    expect(page).toContain('vPC pair without a peer-link (bracket)')
+  })
+
+  it('draws a server symbol as a generic box with thin NIC lines and no port labels', () => {
+    const diag = new Diagram({ title: 't', creator: 'c' })
+    diag.registerMaster(BOX_MASTER)
+    const server: TopologyVisioNode = { id: 'server:pair-1', label: 'UCS C220 M7', sublabel: '2×25G', role: 'server', x: 69, y: 500, panel: { kind: 'server-box', ru: 1, modelId: 'UCS-C220-M7' }, smart: false, modelId: 'UCS-C220-M7' }
+    const nic = (l: string): TopologyVisioEdge => ({ ...edge(l, 'server:pair-1', [{ a: 'Eth1/1', b: 'MLOM/1' }], '25G'), kind: 'server' })
+    const r = buildTopologyDiagram(
+      { ...input([]), pages: [{ title: 'S', orientation: 'vertical', nodes: [leaf('leaf-1', 0, schematic), leaf('leaf-2', 138, schematic), server], edges: [nic('leaf-1'), nic('leaf-2')] }] },
+      diag
+    )
+    expect(r.problems).toEqual([])
+    const page = strFromU8(unzipSync(diag.save())['visio/pages/page1.xml'])
+    expect(page).toContain('<Text>UCS-C220-M7</Text>')
+    expect(page).toContain("<Cell N='LineColor' V='#7F7F7F'/><Cell N='LineWeight' V='0.01'/>")
+    expect(page).not.toContain('MLOM/1')
+    expect(page).toContain('Server NIC (one line per NIC')
+    expect(page).toContain('generic server boxes')
+  })
+
   it('prefixes problems with the page title when there are several pages', () => {
     const diag = new Diagram({ title: 't', creator: 'c' })
     const one = input([edge('spine-1', 'ghost')])

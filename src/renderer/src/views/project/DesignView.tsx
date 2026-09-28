@@ -45,18 +45,22 @@ import {
 } from '@/schemas/project'
 import type { Switch } from '@/schemas/switches'
 import {
+  deleteLeafPairs,
   deleteRackMapping,
   deleteTopologyLayout,
   ipnRouterSpecFromFileEntry,
   loadBreakoutPairs,
   loadCableLinks,
   loadIpnRouters,
+  loadLeafPairs,
   loadPatchPanels,
   loadRackMapping,
   loadSwitchesFile,
   loadTopologyLayout,
-  saveCableLinks
+  saveCableLinks,
+  saveLeafPairs
 } from '@/lib/library-io'
+import { FABRIC_MODE_LABEL } from '@/schemas/project'
 import { runSolver } from '@/lib/solver-bridge'
 import { seedCableLinks } from '@/lib/cable-links-seeder'
 import { projectCommittedCandidate } from '@/lib/design-projection'
@@ -158,6 +162,31 @@ export function DesignView({
     [requirements, projectPath, onRequirementsChanged]
   )
 
+  // Phase 14 — seed leaf_pairs.yaml from the solver's pairing (same fork
+  // pattern as cable_links: absent or solver-sourced → rewrite; a user fork
+  // is kept unless `force`). Returns the pairs now in effect.
+  const reseedLeafPairs = useCallback(
+    async (design: DesignResult, force: boolean) => {
+      const solverPairs = design.vpc?.pairs ?? []
+      try {
+        const existing = await loadLeafPairs(projectPath)
+        if (!force && existing != null && existing.source === 'user') return existing.pairs
+        await saveLeafPairs(projectPath, {
+          schema_version: 1,
+          source: 'solver',
+          seeded_at: new Date().toISOString(),
+          forked_at: null,
+          pairs: solverPairs
+        })
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[leaf-pairs seed] failed:', e)
+      }
+      return solverPairs
+    },
+    [projectPath]
+  )
+
   // Re-seed cable_links.yaml from a (projected) design. `force` ignores
   // an existing user fork; otherwise only seeds when the file is absent
   // or still solver-sourced. Mirrors the Phase 5/6 fork pattern.
@@ -165,6 +194,7 @@ export function DesignView({
     async (design: DesignResult, force: boolean) => {
       if (!workspacePath) return
       try {
+        const pairs = await reseedLeafPairs(design, force)
         const existing = await loadCableLinks(projectPath)
         if (!force && existing != null && existing.source !== 'solver') return
         const breakoutPairs = await loadBreakoutPairs(workspacePath)
@@ -173,11 +203,13 @@ export function DesignView({
           design,
           switches,
           fabric: {
-            uplinks_per_leaf: requirements.fabric.uplinks_per_leaf,
+            // Phase 14 — the solver may have reduced this for the peer-link.
+            uplinks_per_leaf: design.vpc?.effective_uplinks_per_leaf ?? requirements.fabric.uplinks_per_leaf,
             uplinks_per_spine: requirements.fabric.uplinks_per_spine
           },
           breakoutPairs,
-          patchPanels
+          patchPanels,
+          pairs
         })
         await saveCableLinks(projectPath, {
           schema_version: 1,
@@ -191,7 +223,7 @@ export function DesignView({
         console.warn('[cable-links seed] failed:', seedErr)
       }
     },
-    [workspacePath, projectPath, requirements, switches]
+    [workspacePath, projectPath, requirements, switches, reseedLeafPairs]
   )
 
   // ── Generate Design ───────────────────────────────────────────────
@@ -245,6 +277,7 @@ export function DesignView({
       if (regenerateForks) {
         await deleteRackMapping(projectPath)
         await deleteTopologyLayout(projectPath)
+        await deleteLeafPairs(projectPath)
       }
       await reseedCableLinks(projected, regenerateForks)
     },
@@ -265,8 +298,10 @@ export function DesignView({
           loadRackMapping(projectPath).catch(() => null),
           loadTopologyLayout(projectPath).catch(() => null)
         ])
+        const pairsFile = await loadLeafPairs(projectPath).catch(() => null)
         const forks: string[] = []
         if (links && links.source === 'user') forks.push('cable_links.yaml')
+        if (pairsFile && pairsFile.source === 'user') forks.push('leaf_pairs.yaml')
         if (mapping) forks.push('rack_mapping.yaml')
         if (topo && topo.source === 'user') forks.push('topology_layout.yaml')
         if (forks.length > 0) {
@@ -566,7 +601,7 @@ function ResultsPanel({
   result: DesignResult
   switchById: Map<string, Switch>
 }) {
-  const { summary, tiers, spine, breakout, warnings, rack_layout, optics_bom } = result
+  const { summary, tiers, spine, breakout, warnings, rack_layout, optics_bom, vpc } = result
   const errors = warnings.filter((w) => w.severity === 'error')
   const warns = warnings.filter((w) => w.severity === 'warn')
   const infos = warnings.filter((w) => w.severity === 'info')
@@ -609,6 +644,27 @@ function ResultsPanel({
             <Kv k="Host BW" v={`${summary.total_host_bw_g} G`} />
             <Kv k="Uplink BW" v={`${summary.total_uplink_bw_g} G`} />
             <Kv k="Oversub" v={summary.computed_oversub_label} />
+            {vpc && (
+              <>
+                <Kv k="Fabric mode" v={FABRIC_MODE_LABEL[vpc.mode] ?? vpc.mode} />
+                <Kv
+                  k="vPC pairs"
+                  v={`${vpc.pairs.length}${vpc.unpaired.length ? ` (+${vpc.unpaired.length} unpaired)` : ''}`}
+                />
+                <Kv
+                  k="Peer-link"
+                  v={vpc.peer_link ? `${vpc.members} × per pair${vpc.port_channel ? ', Po' : ''}` : 'none'}
+                />
+                <Kv
+                  k="Uplinks/leaf used"
+                  v={
+                    vpc.effective_uplinks_per_leaf === vpc.configured_uplinks_per_leaf
+                      ? String(vpc.effective_uplinks_per_leaf)
+                      : `${vpc.effective_uplinks_per_leaf} (of ${vpc.configured_uplinks_per_leaf})`
+                  }
+                />
+              </>
+            )}
             <Kv
               k="Servers"
               v={String(summary.total_servers)}

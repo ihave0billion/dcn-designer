@@ -37,7 +37,7 @@ export const N9348Y2C6D_SE1U: SwitchSpec = {
   secondary_uplink: { ports: 2, speed_g: 100 },
   ru: 1,
   power_w: 600,
-  capabilities: { rocev2: true, aci_leaf: true, nxos: true }
+  capabilities: { rocev2: true, aci_leaf: true, nxos: true, smart_switch: true }
 }
 
 // Synthetic leaf where the SECONDARY uplink has the higher per-port

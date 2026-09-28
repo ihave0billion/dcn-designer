@@ -26,6 +26,18 @@ export {
 } from './multipod'
 export { ipnRouterSpecFromFileEntry, pickIpnRouter } from './ipn'
 export {
+  effectiveVpcSettings,
+  peerLinkGroupFor,
+  uplinkBudgetAfterPeerLink,
+  pairLeaves,
+  pairLeavesFromTiers,
+  DEFAULT_FABRIC_MODE,
+  DEFAULT_PEER_LINK_MEMBERS,
+  PEER_LINK_MEMBERS_MIN,
+  PEER_LINK_MEMBERS_MAX
+} from './vpc'
+export type { EffectiveVpcSettings, PeerLinkGroupChoice, UplinkBudget, PairingResult } from './vpc'
+export {
   BreakoutPairSchema,
   BreakoutPairsFileSchema,
   IpnRouterSchema,
@@ -40,6 +52,7 @@ export type {
   DesignCandidate,
   DesignResult,
   DesignSummary,
+  FabricMode,
   FabricRequest,
   InputMode,
   IpnRouterCapabilitiesSpec,
@@ -50,6 +63,7 @@ export type {
   OpticsBomEntry,
   OpticsBomScenario,
   PodVariant,
+  PortGroupName,
   PortGroupSpec,
   RackDevicePlacement,
   RackInventoryEntry,
@@ -65,5 +79,7 @@ export type {
   TierResult,
   UplinkChoice,
   UseCase,
+  VpcPair,
+  VpcSummary,
   WarningCode
 } from './types'

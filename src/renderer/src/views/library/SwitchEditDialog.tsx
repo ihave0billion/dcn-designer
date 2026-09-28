@@ -19,6 +19,7 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { SwitchSchema, type PortGroup, type Switch } from '@/schemas/switches'
+import { defaultPeerLinkTemplate } from '@/lib/cable-links-seeder'
 
 interface SwitchEditDialogProps {
   open: boolean
@@ -65,7 +66,8 @@ function defaultSwitch(): Switch {
     available_from: null,
     notes: null,
     data_sheet_url: null,
-    attachments: []
+    attachments: [],
+    peer_link_ports: null
   }
 }
 
@@ -236,6 +238,19 @@ export function SwitchEditDialog({ open, onOpenChange, initial, existingIds, onS
               <Input value={s.asic ?? ''} onChange={(e) => update('asic', e.target.value || null)} />
             </Field>
           </div>
+
+          {/* Phase 14 — vPC peer-link ports. Blank = first ports of the fastest uplink group. */}
+          <Field label="vPC peer-link ports (template)">
+            <Input
+              placeholder={defaultPeerLinkTemplate(s) || 'Eth1/{49..50}'}
+              value={s.peer_link_ports ?? ''}
+              onChange={(e) => update('peer_link_ports', e.target.value || null)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Blank = default rule: the first ports of the highest-speed uplink group (spine uplinks then take the
+              last ones). Smart switches must stay on their 400G ports.
+            </p>
+          </Field>
 
           {/* Phase 13 — Visio export hints. Blank = automatic resolution. */}
           <div className="grid grid-cols-2 gap-4">

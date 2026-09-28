@@ -20,12 +20,16 @@ Bundle format — see docs/VISIO_EXPORT_PLAN.md ("Asset bundle"):
 
 Master lookup per SKU: "<id> Front" exact, then the same name ignoring the
 Cisco family prefix (N9K-C / N9K- / N3K-C — the packs are inconsistent), then
-an --alias. Everything else is reported as "none" (the app falls back to a
-product photo or a generated schematic panel).
+the same "compact key" (every separator dropped, a leading UCS/UCSC/UCSX/UCSB
+removed — the UCS pack spells servers "UCS C220 M7" / "UCSC-C220-M7" where
+servers.yaml says "UCS-C220-M7"), then an --alias. Everything else is
+reported as "none" (the app falls back to a product photo, a generated
+schematic panel, or — for servers — a generic server box).
 
 Usage:
   extract-masters.py --pack stencils/nexus9000/Switches\\ -\\ Cisco\\ Nexus\\ 9000.vssx \\
-      --switches seed/switches.yaml --ipn seed/ipn_routers.yaml \\
+      --pack stencils/ucs/<UCS pack>.vssx \\
+      --switches seed/switches.yaml --ipn seed/ipn_routers.yaml --servers seed/servers.yaml \\
       --images reference/images --out /path/to/workspace [--clean]
 """
 from __future__ import annotations
@@ -69,6 +73,17 @@ def norm(name: str) -> str:
     return FAMILY_PREFIX.sub('', name.strip()).upper()
 
 
+COMPACT_PREFIX = re.compile(r'^UCS[CXB]?')
+
+
+def compact(name: str) -> str:
+    """Phase 14 comparison key for servers: alphanumerics only, UCS prefix dropped
+    ("UCS-C220-M7" == "UCS C220 M7 Front" == "UCSC-C220-M7 Front"). Mirrors
+    resolve-model.ts compactKey."""
+    base = re.sub(r'\s+Front$', '', name.strip(), flags=re.I).upper()
+    return COMPACT_PREFIX.sub('', re.sub(r'[^A-Z0-9]', '', base))
+
+
 def slugify(name: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
 
@@ -110,15 +125,21 @@ class Stencil:
             self.masters[name] = m
             self._targets[name] = relmap[rid]
         self._by_norm = {norm(n): n for n in self.masters}
+        self._by_compact = {compact(n): n for n in self.masters if n.lower().endswith(' front')}
 
     def find(self, sku: str) -> tuple[str | None, str]:
-        """Return (master name, how) — how in exact / prefix / none."""
+        """Return (master name, how) — how in exact / name variant / compact / none."""
         want = f'{sku} Front'
         if want in self.masters:
             return want, 'exact'
         hit = self._by_norm.get(norm(want))
         if hit:
             return hit, 'exact (name variant)'
+        key = compact(sku)
+        if len(key) >= 4:
+            hit = self._by_compact.get(key)
+            if hit:
+                return hit, 'exact (compact key)'
         return None, 'none'
 
     def top_shape(self, name: str) -> ET.Element:
@@ -312,6 +333,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument('--pack', action='append', required=True, help='.vssx stencil (repeatable)')
     ap.add_argument('--switches', type=Path, help='seed/switches.yaml (ids)')
     ap.add_argument('--ipn', type=Path, help='seed/ipn_routers.yaml (ids)')
+    ap.add_argument('--servers', type=Path, help='seed/servers.yaml (ids) — Phase 14 server symbols (UCS pack)')
     ap.add_argument('--sku', action='append', default=[], help='extra SKU (repeatable)')
     ap.add_argument('--images', type=Path, help='dir of product photos named <sku>.png/.jpg')
     ap.add_argument('--alias', action='append', default=[], help='SKU=MasterName (repeatable)')
@@ -322,7 +344,7 @@ def main(argv: list[str]) -> int:
     a = ap.parse_args(argv)
 
     skus: list[str] = []
-    for p in (a.switches, a.ipn):
+    for p in (a.switches, a.ipn, a.servers):
         if p:
             for s in yaml_ids(p):
                 if s not in skus:
@@ -331,7 +353,7 @@ def main(argv: list[str]) -> int:
         if s not in skus:
             skus.append(s)
     if not skus:
-        ap.error('no SKUs (give --switches/--ipn/--sku)')
+        ap.error('no SKUs (give --switches/--ipn/--servers/--sku)')
 
     aliases = {} if a.no_default_aliases else dict(DEFAULT_ALIASES)
     for spec in a.alias:

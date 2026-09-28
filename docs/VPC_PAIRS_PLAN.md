@@ -1,7 +1,27 @@
-# Phase 14 — vPC leaf pairs, peer-links, and server symbols (APPROVED, not started)
+# Phase 14 — vPC leaf pairs, peer-links, and server symbols (BUILT — v1.4.0, 2026-09-28)
 
-Interviewed and approved 2026-09-28 (one question at a time). Build this in a fresh
-session from `main` (≥ v1.3.0). Every decision below is the user's; do not re-ask.
+Interviewed and approved 2026-09-28 (one question at a time); built the same day on
+`feat/vpc-pairs`. Every decision below is the user's; do not re-ask.
+
+**Built as planned, with two refinements found on the real SITE-A workspace:**
+
+- **Decision 3, default peer-link group.** The SITE-A's second tier (9348GC-FX3: 2×100G
+  uplinks + 4×25G secondary uplinks) cannot hold 2 spine uplinks *and* a 2-port
+  peer-link in its 100G group — the literal rule zeroed its uplinks and invalidated
+  the whole design. `peerLinkGroupFor()` therefore takes the fastest uplink group
+  only when it still has room for the configured uplinks; otherwise a **non-smart**
+  leaf's peer-link moves to its other uplink group (FX3 → Eth1/49-50 at 25G, both
+  100G ports stay for the spines). **Smart switches never leave their 400G ports**
+  (SE1U → Eth1/49-50 at 400G); if that costs uplinks the solver reduces them and
+  warns, exactly as decision 5 says. The library `peer_link_ports` template still
+  overrides everything.
+- **UCS masters (decision 10).** The resolver matches server ids by a compact key
+  (`UCS-C220-M7` ≡ `UCS C220 M7 Front` ≡ `UCSC-C220-M7 Front`) and
+  `extract-masters.py --servers seed/servers.yaml` extracts them — but cisco.com
+  answered 403 to every scripted download of the UCS pack, so the bundle in
+  production still has no server masters and every server draws as the generic box
+  (reported as a substitution). Download the pack in a browser and re-run the
+  extractor to finish this.
 
 ## Decisions
 

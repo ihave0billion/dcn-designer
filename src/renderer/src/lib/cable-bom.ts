@@ -1,4 +1,4 @@
-import type { CableLink } from '@/schemas/cable-links'
+import type { CableLink, CableLinkKind } from '@/schemas/cable-links'
 
 // Phase 9 — cable-length BOM.
 //
@@ -94,8 +94,10 @@ export function deriveLinkLength(link: CableLink, cableTrayM: number | null): De
 }
 
 export interface CableBomRow {
-  /** Orderable length. Rows are keyed on this, speed, and optic. */
+  /** Orderable length. Rows are keyed on this, kind, speed, and optic. */
   ordered_length_m: number
+  /** Phase 14 — fabric uplink vs vPC peer-link (peer-links get their own rows). */
+  kind: CableLinkKind
   speed_g: number
   optic_id: string | null
   media: CableMedia
@@ -122,6 +124,8 @@ export interface CableBom {
   total_ordered_m: number
   /** How many rows came from a user-entered length rather than derivation. */
   user_specified_links: number
+  /** Phase 14 — vPC peer-link cables (a subset of total_links). */
+  peer_link_links: number
 }
 
 export interface BuildCableBomInput {
@@ -141,8 +145,11 @@ export function buildCableBom({ links, cable_tray_m }: BuildCableBomInput): Cabl
   let overLengthMax: number | null = null
   let userSpecified = 0
   let costed = 0
+  let peerLinks = 0
 
   for (const link of links) {
+    const kind: CableLinkKind = link.kind ?? 'uplink'
+    if (kind === 'vpc-peer-link') peerLinks += 1
     const { raw_m, source } = deriveLinkLength(link, cable_tray_m)
 
     if (raw_m == null) {
@@ -161,7 +168,7 @@ export function buildCableBom({ links, cable_tray_m }: BuildCableBomInput): Cabl
     costed += 1
 
     const optic = link.optic_id ?? null
-    const key = `${ordered}|${link.speed_g}|${optic ?? ''}`
+    const key = `${ordered}|${kind}|${link.speed_g}|${optic ?? ''}`
     const existing = byKey.get(key)
     if (existing) {
       existing.count += 1
@@ -170,6 +177,7 @@ export function buildCableBom({ links, cable_tray_m }: BuildCableBomInput): Cabl
     } else {
       byKey.set(key, {
         ordered_length_m: ordered,
+        kind,
         speed_g: link.speed_g,
         optic_id: optic,
         media: mediaForLength(ordered),
@@ -183,6 +191,7 @@ export function buildCableBom({ links, cable_tray_m }: BuildCableBomInput): Cabl
   const rows = [...byKey.values()].sort(
     (a, b) =>
       b.ordered_length_m - a.ordered_length_m ||
+      KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
       b.speed_g - a.speed_g ||
       (a.optic_id ?? '').localeCompare(b.optic_id ?? '')
   )
@@ -205,7 +214,22 @@ export function buildCableBom({ links, cable_tray_m }: BuildCableBomInput): Cabl
     total_links: links.length,
     costed_links: costed,
     total_ordered_m: rows.reduce((sum, r) => sum + r.total_ordered_m, 0),
-    user_specified_links: userSpecified
+    user_specified_links: userSpecified,
+    peer_link_links: peerLinks
+  }
+}
+
+const KIND_ORDER: Record<CableLinkKind, number> = { uplink: 0, 'vpc-peer-link': 1, server: 2 }
+
+/** Short label for a BOM row's kind, shared by the UI and the PDF. */
+export function cableKindLabel(kind: CableLinkKind): string {
+  switch (kind) {
+    case 'vpc-peer-link':
+      return 'vPC peer-link'
+    case 'server':
+      return 'Server'
+    default:
+      return 'Fabric uplink'
   }
 }
 

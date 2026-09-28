@@ -18,7 +18,7 @@ import type { CableLink } from '@/schemas/cable-links'
 import type { DesignResult } from '@domain'
 import { loadCableLinks, loadSwitchesFile } from '@/lib/library-io'
 import { buildDeviceBom } from '@/lib/device-bom'
-import { buildCableBom } from '@/lib/cable-bom'
+import { buildCableBom, cableKindLabel } from '@/lib/cable-bom'
 import { findCandidate } from '@/lib/design-projection'
 import { SeverityBadge, StatusPill } from '@/components/design-status'
 
@@ -231,6 +231,7 @@ export function SummaryView({
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-24">Length</TableHead>
+                        <TableHead className="w-32">Kind</TableHead>
                         <TableHead className="w-20">Speed</TableHead>
                         <TableHead>Media</TableHead>
                         <TableHead className="w-20 text-right">Count</TableHead>
@@ -240,6 +241,7 @@ export function SummaryView({
                       {cableBom.rows.map((r, i) => (
                         <TableRow key={i}>
                           <TableCell>{r.ordered_length_m} m</TableCell>
+                          <TableCell className="text-xs">{cableKindLabel(r.kind)}</TableCell>
                           <TableCell>{r.speed_g} G</TableCell>
                           <TableCell className="uppercase text-xs">{r.media}</TableCell>
                           <TableCell className="text-right">{r.count}</TableCell>

@@ -33,7 +33,18 @@ export function familyKey(name: string): string {
     .toUpperCase()
 }
 
-/** The bundle's master name for a model: exact "<id> Front", else the same name ignoring the family prefix. */
+// Phase 14 — the UCS pack spells servers "UCS C220 M7" / "UCSC-C220-M7"
+// where the library says "UCS-C220-M7": compare with every separator
+// dropped and a leading UCS/UCSC/UCSX/UCSB prefix removed.
+export function compactKey(name: string): string {
+  return name
+    .replace(/\s+Front$/i, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .replace(/^UCS[CXB]?/, '')
+}
+
+/** The bundle's master name for a model: exact "<id> Front", else the same name ignoring the family prefix, else the same compact key. */
 export function findMasterName(modelId: string, index: VisioIndex | null): string | null {
   if (!index) return null
   const exact = masterNameFor(modelId)
@@ -41,6 +52,12 @@ export function findMasterName(modelId: string, index: VisioIndex | null): strin
   const key = familyKey(modelId)
   for (const name of Object.keys(index.masters)) {
     if (familyKey(name) === key) return name
+  }
+  const compact = compactKey(modelId)
+  if (compact.length >= 4) {
+    for (const name of Object.keys(index.masters)) {
+      if (compactKey(name) === compact) return name
+    }
   }
   return null
 }

@@ -125,6 +125,7 @@ function makeLink(
 ): CableLink {
   return {
     id,
+    kind: 'uplink',
     device_a: { rack: null, device_id: spineId, port: spinePort },
     device_b: { rack: null, device_id: leafId, port: leafPort },
     speed_g: 100,
@@ -169,6 +170,7 @@ describe('extractTopology', () => {
       // source = spine so the visual top-down direction is consistent.
       {
         id: 'l1',
+        kind: 'uplink',
         device_a: { rack: null, device_id: 'leaf-1', port: 'Eth1/49' },
         device_b: { rack: null, device_id: 'spine-1', port: 'Eth1/3' },
         speed_g: 100,
@@ -236,6 +238,7 @@ describe('extractTopology', () => {
       makeLink('link-1', 'spine-1', 'Eth1/1', 'leaf-1', 'Eth1/49'),
       {
         id: 'ipn-link-1',
+        kind: 'uplink',
         device_a: { rack: null, device_id: 'spine-1', port: 'Eth1/64' },
         device_b: { rack: null, device_id: 'ipn-1', port: 'Eth1/1' },
         speed_g: 400,
@@ -256,6 +259,34 @@ describe('extractTopology', () => {
     expect(ipnEdge?.source).toBe('spine-1')
     // IPN nodes lead the node list (top tier).
     expect(graph.nodes[0].role).toBe('ipn')
+  })
+})
+
+describe('extractTopology — vPC pairs (Phase 14)', () => {
+  it('keeps device_a as the source of a leaf↔leaf peer-link and carries the kind', () => {
+    const design = makeDesign({ leaves: 2 })
+    const links: CableLink[] = [
+      makeLink('link-1', 'spine-1', 'Eth1/1', 'leaf-1', 'Eth1/51'),
+      { ...makeLink('pl-1', 'leaf-1', 'Eth1/49', 'leaf-2', 'Eth1/49'), kind: 'vpc-peer-link' }
+    ]
+    const g = extractTopology(design, links)
+    const pl = g.edges.find((e) => e.id === 'pl-1')!
+    expect(pl).toMatchObject({ kind: 'vpc-peer-link', source: 'leaf-1', target: 'leaf-2' })
+    expect(g.edges.find((e) => e.id === 'link-1')?.kind).toBe('uplink')
+    expect(g.nodes.find((n) => n.id === 'leaf-1')?.usedPorts).toEqual(['Eth1/49', 'Eth1/51'])
+  })
+
+  it('annotates leaves with their pair from design.vpc, or from an explicit list', () => {
+    const design = { ...makeDesign({ leaves: 3 }), vpc: { mode: 'nxos-evpn' as const, peer_link: true, port_channel: true, members: 2, configured_uplinks_per_leaf: 4, effective_uplinks_per_leaf: 4, pairs: [{ id: 'pair-1', members: ['leaf-1', 'leaf-2'] as [string, string] }], unpaired: ['leaf-3'] } }
+    const g = extractTopology(design, [])
+    expect(g.nodes.find((n) => n.id === 'leaf-1')).toMatchObject({ pair_id: 'pair-1', pair_peer: 'leaf-2' })
+    expect(g.nodes.find((n) => n.id === 'leaf-2')).toMatchObject({ pair_id: 'pair-1', pair_peer: 'leaf-1' })
+    expect(g.nodes.find((n) => n.id === 'leaf-3')).toMatchObject({ pair_id: null, pair_peer: null })
+    expect(g.nodes.find((n) => n.id === 'spine-1')?.pair_id).toBeNull()
+    expect(g.pairs).toEqual(design.vpc.pairs)
+    const forked = extractTopology(design, [], [{ id: 'pair-1', members: ['leaf-2', 'leaf-3'] }])
+    expect(forked.nodes.find((n) => n.id === 'leaf-1')?.pair_id).toBeNull()
+    expect(forked.nodes.find((n) => n.id === 'leaf-3')?.pair_peer).toBe('leaf-2')
   })
 })
 

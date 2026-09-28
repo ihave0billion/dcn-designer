@@ -1,5 +1,6 @@
 import type { DesignResult } from '@domain'
-import type { CableLink } from '@/schemas/cable-links'
+import type { CableLink, CableLinkKind } from '@/schemas/cable-links'
+import type { LeafPair } from '@/schemas/leaf-pairs'
 
 // Phase 7 topology data extractor.
 //
@@ -35,6 +36,9 @@ export interface TopologyNode {
   // (applyNicknames) — `label` is then the hostname shown on the canvas.
   smart?: boolean
   hostname_source?: 'user' | 'auto'
+  // Phase 14 — vPC pair membership (leaves only). null = unpaired.
+  pair_id?: string | null
+  pair_peer?: string | null
   // Ports that have at least one cable link attached. Stable-sorted.
   // These render as react-flow Handles on the node.
   usedPorts: string[]
@@ -42,6 +46,8 @@ export interface TopologyNode {
 
 export interface TopologyEdge {
   id: string // matches cable link id
+  // Phase 14 — 'uplink' (spine↔leaf, spine↔IPN) or 'vpc-peer-link' (leaf↔leaf).
+  kind: CableLinkKind
   source: string // device_id (spine for fabric uplinks)
   sourcePort: string
   target: string // device_id (leaf for fabric uplinks)
@@ -56,6 +62,8 @@ export interface TopologyEdge {
 export interface TopologyGraph {
   nodes: TopologyNode[]
   edges: TopologyEdge[]
+  // Phase 14 — the vPC pairs in effect (leaf_pairs.yaml, else the solver's).
+  pairs?: LeafPair[]
   // device_ids referenced by cable_links.yaml but absent from
   // design.rack_layout. Phase 7 still renders them as orphan nodes so
   // edges aren't dropped silently — Phase 10 polish can surface this in
@@ -151,8 +159,13 @@ function synthesiseDevicesFromSummary(design: DesignResult): {
 
 export function extractTopology(
   design: DesignResult,
-  cableLinks: CableLink[]
+  cableLinks: CableLink[],
+  // Phase 14 — the pairs to annotate leaves with; omitted = design.vpc.pairs.
+  pairs?: LeafPair[] | null
 ): TopologyGraph {
+  const leafPairs: LeafPair[] = pairs ?? design.vpc?.pairs ?? []
+  const pairOfLeaf = new Map<string, LeafPair>()
+  for (const p of leafPairs) for (const m of p.members) pairOfLeaf.set(m, p)
   let { ipns, spines, leaves } = collectDevicesFromLayout(design)
   if (spines.length === 0 && leaves.length === 0) {
     ;({ spines, leaves } = synthesiseDevicesFromSummary(design))
@@ -211,6 +224,7 @@ export function extractTopology(
   const buildNode = (entry: { id: string } & DeviceMeta): TopologyNode => {
     const used = portsByDevice.get(entry.id)
     const usedPorts = used ? [...used].sort(comparePortNames) : []
+    const pair = entry.role === 'leaf' ? pairOfLeaf.get(entry.id) ?? null : null
     return {
       id: entry.id,
       role: entry.role,
@@ -220,6 +234,8 @@ export function extractTopology(
       ru: entry.ru,
       power_w: entry.power_w,
       pod_index: entry.pod_index,
+      pair_id: pair?.id ?? null,
+      pair_peer: pair ? (pair.members[0] === entry.id ? pair.members[1] : pair.members[0]) : null,
       usedPorts
     }
   }
@@ -235,7 +251,8 @@ export function extractTopology(
   // Edges: source = spine end if either end is a spine; otherwise just
   // device_a. cable_links.yaml seeded from Phase 6 always has device_a =
   // spine, but a user-imported CSV could swap them. (Both spine↔leaf and
-  // spine↔IPN links keep spine as the source.)
+  // spine↔IPN links keep spine as the source; a Phase 14 peer-link has no
+  // spine on either end and keeps device_a.)
   const spineIds = new Set(spines.map((s) => s.id))
   const edges: TopologyEdge[] = cableLinks.map((link) => {
     const aIsSpine = spineIds.has(link.device_a.device_id)
@@ -245,6 +262,7 @@ export function extractTopology(
     const targetEnd = sourceFirst ? link.device_b : link.device_a
     return {
       id: link.id,
+      kind: link.kind ?? 'uplink',
       source: sourceEnd.device_id,
       sourcePort: sourceEnd.port,
       target: targetEnd.device_id,
@@ -257,7 +275,7 @@ export function extractTopology(
     }
   })
 
-  return { nodes, edges, orphanDeviceIds: [...orphans] }
+  return { nodes, edges, pairs: leafPairs, orphanDeviceIds: [...orphans] }
 }
 
 // Sort port names like "Eth1/1", "Eth1/2", ..., "Eth1/49/1", "Eth1/49/2"

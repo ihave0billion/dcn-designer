@@ -73,7 +73,8 @@ function emptyTier(
     override_uplink_speed_applied_g: null,
     host_bw_g: 0,
     uplink_bw_g: 0,
-    xor_status: status
+    xor_status: status,
+    server_model_id: req.server_model_id ?? null
   }
 }
 
@@ -189,7 +190,8 @@ export function computeTier(
       override_uplink_speed_applied_g: req.override_uplink_speed_g ?? null,
       host_bw_g,
       uplink_bw_g,
-      xor_status: 'ok'
+      xor_status: 'ok',
+      server_model_id: req.server_model_id ?? null
     },
     warnings
   }

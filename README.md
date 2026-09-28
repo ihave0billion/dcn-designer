@@ -27,6 +27,13 @@ self-hosted in a browser.
   on-screen position, every link, port labels — drawn with official Cisco stencil masters
   (extracted once into the workspace, see DEPLOY.md), a product photo, or a generated
   schematic front panel; every substitution is listed in the Export tab.
+- **vPC leaf pairs.** Fabric mode (NX-OS classic, VXLAN EVPN, ACI) decides whether pairs get a
+  peer-link and a port-channel; the solver pairs leaves, reserves the peer-link ports (smart
+  switches stay on their 400G ports) and reduces spine uplinks with a warning when it must.
+  Peer-links are seeded as their own cable kind — red on the Topology tab, in the PDF and in
+  Visio, own rows in the cable BOM; ACI pairs show a bracket instead. "Show servers" adds one
+  server symbol per leaf or per pair (model + NIC speed, one line per NIC) that both exports
+  honour.
 - **Library.** Switch, server, optics and IPN router catalogues in YAML; Cisco TMG optics CSV
   importer.
 

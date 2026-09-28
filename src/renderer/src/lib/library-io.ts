@@ -16,6 +16,7 @@ import {
   TopologyLayoutFileSchema,
   type TopologyLayoutFile
 } from '@/schemas/topology-layout'
+import { LeafPairsFileSchema, type LeafPairsFile } from '@/schemas/leaf-pairs'
 import {
   BreakoutPairsFileSchema,
   IpnRoutersFileSchema,
@@ -317,3 +318,43 @@ export async function deleteTopologyLayout(projectPath: string): Promise<void> {
 }
 
 export type { TopologyLayoutFile }
+
+// ────────────────────────────────────────────────────────────────────
+// Leaf pairs — per project vPC pairs (Phase 14)
+// Lives at <project>/leaf_pairs.yaml. Seeded by Generate Design from the
+// solver's pairing; the first user edit flips source: 'user'. Absent =
+// consumers fall back to design.yaml's `vpc.pairs`.
+// ────────────────────────────────────────────────────────────────────
+
+export function leafPairsPath(projectPath: string): string {
+  return `${projectPath}/leaf_pairs.yaml`
+}
+
+export async function loadLeafPairs(projectPath: string): Promise<LeafPairsFile | null> {
+  const path = leafPairsPath(projectPath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return null
+  const raw = await window.dcn.readYaml(path)
+  const parsed = LeafPairsFileSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`leaf_pairs.yaml schema validation failed: ${parsed.error.message}`)
+  }
+  return parsed.data
+}
+
+export async function saveLeafPairs(projectPath: string, file: LeafPairsFile): Promise<void> {
+  const parsed = LeafPairsFileSchema.safeParse(file)
+  if (!parsed.success) {
+    throw new Error(`leaf_pairs.yaml schema validation failed before save: ${parsed.error.message}`)
+  }
+  await window.dcn.writeYaml(leafPairsPath(projectPath), parsed.data)
+}
+
+export async function deleteLeafPairs(projectPath: string): Promise<void> {
+  const path = leafPairsPath(projectPath)
+  const exists = await window.dcn.fileExists(path)
+  if (!exists) return
+  await window.dcn.deleteFile(path)
+}
+
+export type { LeafPairsFile }

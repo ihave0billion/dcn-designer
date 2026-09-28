@@ -680,6 +680,26 @@ earlier interim commit was dropped before the recommit.
 
 ## Lessons / patterns
 
+### 2026-09-28 — A "reserve N ports per leaf" rule must be checked against every tier's port groups (Phase 14)
+The plan's peer-link rule ("first two ports of the uplink group") was written with the
+SITE-A's smart switches in mind (6×400G). The same project's second tier, the 9348GC-FX3,
+has a 2×100G uplink group — reserving 2 ports there left 0 uplinks, and because
+`uplinks_per_leaf` is fabric-wide the solver reduced it to 1 and the whole design went
+invalid. The fix was not a special case but a general rule (`peerLinkGroupFor`): take the
+fastest group only when it keeps room for the configured uplinks, else use the leaf's
+other uplink group — with smart switches pinned to their 400G ports because that was an
+explicit decision. Lesson: run every port-budget rule against the real workspace
+(`docker cp` the NAS `/data`, `DCN_WORKSPACE=… node src/server/index.ts`, regenerate in
+the laptop browser) before calling it done; unit fixtures only model the tier you were
+thinking of.
+
+### 2026-09-28 — cisco.com refuses scripted stencil downloads
+`fetch-stencils.sh` got HTTP 403 for the UCS pack from both the herdr container and the
+laptop (any curl User-Agent). The Nexus pack in production was fetched in a browser in
+Phase 13. Treat the packs as a manual, browser-downloaded input; the extractor and the
+app cope with a bundle that simply lacks a family (generic server box + substitution
+note).
+
 ### 2026-06-03 — Headless GUI verification + interactive viewing on this VM
 The long-standing "no way to see/drive the GUI on this headless VM" blocker is
 solved. Two complementary paths:

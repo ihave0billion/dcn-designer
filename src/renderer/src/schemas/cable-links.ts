@@ -17,8 +17,16 @@ export const CableEndpointSchema = z.object({
 })
 export type CableEndpoint = z.infer<typeof CableEndpointSchema>
 
+// Phase 14 — what a cable is for. Old files carry no `kind` and parse as
+// spine↔leaf uplinks. Peer-links are the vPC pair's leaf↔leaf cables;
+// 'server' is reserved for host wiring (not seeded — the topology draws
+// server symbols from the tier, not from links).
+export const CableLinkKindSchema = z.enum(['uplink', 'vpc-peer-link', 'server'])
+export type CableLinkKind = z.infer<typeof CableLinkKindSchema>
+
 export const CableLinkSchema = z.object({
   id: z.string().min(1),
+  kind: CableLinkKindSchema.default('uplink'),
   device_a: CableEndpointSchema,
   device_b: CableEndpointSchema,
   speed_g: z.number().positive(),

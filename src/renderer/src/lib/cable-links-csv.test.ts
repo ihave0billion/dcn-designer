@@ -12,6 +12,7 @@ const validDevices = {
 
 const LINK: CableLink = {
   id: 'link-0001',
+  kind: 'uplink',
   device_a: { rack: 'Rack A', device_id: 'spine-1', port: 'Eth1/1' },
   device_b: { rack: 'Rack A', device_id: 'leaf-1', port: 'Eth1/49' },
   speed_g: 400,
@@ -56,6 +57,7 @@ describe('parseCableLinksCsv', () => {
     expect(result.links).toHaveLength(1)
     expect(result.links[0]).toMatchObject({
       id: 'link-0001',
+      kind: 'uplink',
       device_a: { device_id: 'spine-1', port: 'Eth1/1' },
       device_b: { device_id: 'leaf-1', port: 'Eth1/49' },
       speed_g: 400,

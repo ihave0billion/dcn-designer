@@ -121,7 +121,15 @@ rsync -a /tmp/visio-out/library/visio/ nas:/mnt/user/appdata/dcn-designer/librar
 
 (`<stencil dir> <seed dir> <images dir|-> <out dir>`; pass a folder of `<sku>.png` product
 photos as the third argument to bundle them.) `extract-masters.py` runs on plain python3 too
-(PNGs need `soffice` on PATH). Re-run when
+(PNGs need `soffice` on PATH).
+
+**Server symbols (v1.4).** The Topology "Show servers" symbol and both exports use the UCS
+pack's masters when the library server id matches one (`UCS-C220-M7` ≡ `UCS C220 M7
+Front`, compact-key match); otherwise a generic grey server box is drawn and listed as a
+substitution. cisco.com answers **403 to scripted downloads** of the UCS pack, so fetch
+`unified-computing-system-hyperflex-systems.zip` from the Visio stencil listing in a browser,
+unzip it next to the Nexus pack, and pass the seed dir as before — `extract-masters.py` also
+reads `seed/servers.yaml` (`--servers`) when you run it by hand. Re-run when
 Cisco publishes a new pack or a model is added to the library. Without the bundle the
 export still works — every device is drawn as a schematic front panel and the Export tab
 says so. Per-model overrides (`visio.master` / `visio.image`) live in the switch editor.

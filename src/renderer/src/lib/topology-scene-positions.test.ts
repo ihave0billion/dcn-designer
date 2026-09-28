@@ -23,6 +23,7 @@ const scene: Scene = {
   level: { kind: 'devices', fabricId: 'f' },
   nodes: [node('spine-1', 1, 'spine'), node('leaf-1', 2, 'leaf'), node('leaf-2', 2, 'leaf')],
   edges: [],
+  pairs: [],
   breadcrumb: []
 }
 
@@ -34,7 +35,8 @@ function file(scenePositions: TopologyLayoutFile['scene_positions'], generator =
     forked_at: null,
     positions: [],
     scene_positions: scenePositions,
-    generator
+    generator,
+    show_servers: false
   }
 }
 

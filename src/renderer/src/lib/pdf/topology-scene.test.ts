@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildPdfScenePages, rectEdgePoint, PANEL_W } from './topology-scene'
+import { buildPdfScenePages, rectEdgePoint, PANEL_W, SERVER_W, PAIR_PAD } from './topology-scene'
+import { TILE_H, TILE_W } from '@/lib/topology-hierarchy'
 import type { TopologyGraph, TopologyNode } from '@/lib/topology-extractor'
 import { TOPOLOGY_LAYOUT_GENERATOR } from '@/schemas/topology-layout'
 
@@ -13,6 +14,7 @@ const graph: TopologyGraph = {
     ['leaf-1', 'leaf-2'].flatMap((l) =>
       [1, 2].map((k) => ({
         id: `${s}-${l}-${k}`,
+        kind: 'uplink' as const,
         source: s,
         sourcePort: `Eth1/${k}`,
         target: l,
@@ -40,7 +42,7 @@ describe('buildPdfScenePages', () => {
     expect(spine.y).toBeLessThan(leaf.y)
     expect(spine.labelAbove).toBe(true)
     expect(leaf.labelAbove).toBe(false)
-    expect(page.counts).toEqual({ spine: 2, leaf: 2, ipn: 0 })
+    expect(page.counts).toEqual({ spine: 2, leaf: 2, ipn: 0, server: 0 })
     expect(page.width).toBeGreaterThan(PANEL_W * 2)
   })
 
@@ -66,6 +68,7 @@ describe('buildPdfScenePages', () => {
       forked_at: null,
       positions: [],
       generator: TOPOLOGY_LAYOUT_GENERATOR,
+      show_servers: false,
       scene_positions: [{ scene: 'devices:fabric|vertical', node_id: 'leaf-2', x: 900, y: 700 }]
     })
     expect(page.custom).toBe(true)
@@ -111,5 +114,59 @@ describe('buildPdfScenePages', () => {
     expect(rectEdgePoint(0, 0, 10, 5, 100, 0)).toEqual({ x: 10, y: 0 })
     const p = rectEdgePoint(0, 0, 10, 5, 100, 100)
     expect(p).toEqual({ x: 5, y: 5 })
+  })
+})
+
+describe('buildPdfScenePages — vPC pairs + servers (Phase 14)', () => {
+  const paired = (peerLink: boolean): TopologyGraph => ({
+    ...graph,
+    nodes: graph.nodes.map((n) => (n.role === 'leaf' ? { ...n, pair_id: 'pair-1', pair_peer: n.id === 'leaf-1' ? 'leaf-2' : 'leaf-1' } : n)),
+    pairs: [{ id: 'pair-1', members: ['leaf-1', 'leaf-2'] }],
+    edges: [
+      ...graph.edges,
+      ...(peerLink
+        ? [1, 2].map((k) => ({ id: `pl-${k}`, kind: 'vpc-peer-link' as const, source: 'leaf-1', sourcePort: `Eth1/4${8 + k}`, target: 'leaf-2', targetPort: `Eth1/4${8 + k}`, speed_g: 400, optic_id: null, patch_panel_id: null, label: '', length_m: null }))
+        : [])
+    ]
+  })
+  const serverInfo = () => ({ model_id: 'UCS-C220-M7', label: 'UCS C220 M7', nics: 2, nic_speed_g: 25, ru: 1 })
+
+  it('draws the peer-link as one red-kind edge between the leaves and counts it', () => {
+    const [page] = buildPdfScenePages(paired(true), 'Acme', null)
+    const pl = page.edges.filter((e) => e.kind === 'vpc-peer-link')
+    expect(pl).toHaveLength(1)
+    expect(pl[0]).toMatchObject({ source: 'leaf-1', target: 'leaf-2', count: 2, dashed: false })
+    expect(page.peerLinks).toBe(1)
+    expect(page.pairs).toEqual([])
+    expect(page.edges.filter((e) => e.kind === 'fabric')).toHaveLength(4)
+  })
+
+  it('brackets a pair that has no peer-link, padded around both tiles', () => {
+    const [page] = buildPdfScenePages(paired(false), 'Acme', null)
+    expect(page.peerLinks).toBe(0)
+    expect(page.pairs).toHaveLength(1)
+    const p = page.pairs[0]
+    const a = page.nodes.find((n) => n.id === 'leaf-1')!
+    const b = page.nodes.find((n) => n.id === 'leaf-2')!
+    // the bracket spans both tiles (tile = panel centre ± TILE_W/2) plus padding
+    expect(p.x).toBeCloseTo(Math.min(a.x + a.w / 2, b.x + b.w / 2) - TILE_W / 2 - PAIR_PAD, 5)
+    expect(p.w).toBeCloseTo(Math.abs(a.x - b.x) + TILE_W + 2 * PAIR_PAD, 5)
+    expect(p.h).toBeCloseTo(TILE_H + 2 * PAIR_PAD, 5)
+    expect(p.label).toBe('vPC pair')
+  })
+
+  it('adds one server symbol per pair under the leaves with two NIC lines when show_servers is on', () => {
+    const off = buildPdfScenePages(paired(true), 'Acme', null, { serverInfo })
+    expect(off[0].nodes.some((n) => n.kind === 'server')).toBe(false)
+    const [page] = buildPdfScenePages(paired(true), 'Acme', null, { showServers: true, serverInfo })
+    const servers = page.nodes.filter((n) => n.kind === 'server')
+    expect(servers).toHaveLength(1)
+    expect(servers[0]).toMatchObject({ id: 'server:pair-1', label: 'UCS C220 M7', sublabel: '2×25G', modelId: 'UCS-C220-M7', w: SERVER_W })
+    expect(page.counts.server).toBe(1)
+    const leafY = page.nodes.find((n) => n.id === 'leaf-1')!.y
+    expect(servers[0].y).toBeGreaterThan(leafY)
+    const lines = page.edges.filter((e) => e.kind === 'server')
+    expect(lines.map((e) => e.source).sort()).toEqual(['leaf-1', 'leaf-2'])
+    expect(lines.every((e) => e.target === 'server:pair-1' && e.count === 1)).toBe(true)
   })
 })

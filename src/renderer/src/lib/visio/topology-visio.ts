@@ -53,8 +53,15 @@ export const EDGE_LABEL_MAX_EDGES = 40
 export const COLOR_FABRIC = '#0070C0'
 export const COLOR_IPN = '#B85450'
 export const COLOR_MUTED = '#595959'
+/** Phase 14 — the skill's peer-link red (solid; IPN links are the same red, dashed). */
+export const COLOR_PEER_LINK = '#B85450'
+export const COLOR_SERVER = '#7F7F7F'
+export const COLOR_SERVER_FILL = '#D9D9D9'
 
-export type TopologyVisioRole = 'spine' | 'leaf' | 'ipn' | null
+export type TopologyVisioRole = 'spine' | 'leaf' | 'ipn' | 'server' | null
+
+/** Phase 14 — how an edge is drawn. */
+export type TopologyVisioEdgeKind = 'fabric' | 'ipn' | 'vpc-peer-link' | 'server'
 
 /** Port group of a schematic panel (re-exported for the orchestration layer). */
 export type SchematicGroup = SchematicPortGroup
@@ -63,6 +70,11 @@ export type ResolvedPanel =
   | { kind: 'master'; masterName: string }
   | { kind: 'image'; bytes: Uint8Array; imageKind: 'png' | 'jpeg'; widthIn?: number }
   | { kind: 'schematic'; ru: number; groups: SchematicGroup[]; modelId?: string }
+  // Phase 14 — generic server box when the UCS pack has no master for the model.
+  | { kind: 'server-box'; ru: number; modelId: string }
+
+/** Generic server box: 19 in wide, RU-tall, like a chassis. */
+export const SERVER_BOX_W = 19
 
 export interface TopologyVisioNode {
   id: string
@@ -81,6 +93,8 @@ export interface TopologyVisioNode {
 
 export interface TopologyVisioEdge {
   id: string
+  /** Phase 14 — omitted = fabric (or ipn when an end is an IPN router). */
+  kind?: TopologyVisioEdgeKind
   source: string
   target: string
   count: number
@@ -90,12 +104,21 @@ export interface TopologyVisioEdge {
   ports: Array<{ a: string; b: string }>
 }
 
+/** Phase 14 — a vPC pair drawn as a dashed bracket around its two panels. */
+export interface TopologyVisioPair {
+  id: string
+  memberIds: string[]
+  label: string
+}
+
 export interface TopologyVisioPage {
   title: string
   /** Printed under the title, e.g. where the positions came from. */
   subtitle?: string
   nodes: TopologyVisioNode[]
   edges: TopologyVisioEdge[]
+  /** Phase 14 — pairs WITHOUT a peer-link (ACI / peer-link off); others show as red lines. */
+  pairs?: TopologyVisioPair[]
   orientation: 'vertical' | 'horizontal'
 }
 
@@ -280,7 +303,13 @@ function panelSize(diag: Diagram, n: TopologyVisioNode): { w: number; h: number 
     const px = imagePixelSize(p.bytes)
     return { w, h: (w * px.h) / px.w }
   }
+  if (p.kind === 'server-box') return { w: SERVER_BOX_W, h: 1.75 * Math.max(1, p.ru) }
   return { w: 19, h: 1.75 * Math.max(1, p.ru) }
+}
+
+function edgeKindOf(e: TopologyVisioEdge, a: PlacedNode, b: PlacedNode): TopologyVisioEdgeKind {
+  if (e.kind) return e.kind
+  return a.node.role === 'ipn' || b.node.role === 'ipn' ? 'ipn' : 'fabric'
 }
 
 /** Build every page of the drawing into `diag`. */
@@ -346,6 +375,18 @@ export function buildTopologyDiagram(
         ref = diag.drop(page, n.panel.masterName, x, y)
       } else if (n.panel.kind === 'image') {
         ref = diag.image(page, { bytes: n.panel.bytes, kind: n.panel.imageKind }, x, y, { w: size.w })
+      } else if (n.panel.kind === 'server-box') {
+        // Generic server: a grey chassis with the model printed inside.
+        const modelText = fitText(n.panel.modelId, size.w - 0.4, k, 7, 4.5, true)
+        ref = diag.box(page, x, y, size.w, size.h, {
+          fill: COLOR_SERVER_FILL,
+          line: COLOR_SERVER,
+          weight: 0.012,
+          text: modelText.text,
+          fontPt: modelText.pt,
+          bold: true,
+          textColor: '#262626'
+        })
       } else {
         if (n.panel.kind === 'master') {
           pageProblems.push(`${n.id}: master '${n.panel.masterName}' not registered — drew a schematic panel`)
@@ -453,9 +494,33 @@ export function buildTopologyDiagram(
       }
     }
 
+    // ── vPC pair brackets (Phase 14, decision 11) ──
+    let bracketsDrawn = 0
+    for (const p of spec.pairs ?? []) {
+      const members = p.memberIds.map((id) => placed.get(id)).filter((m): m is PlacedNode => !!m)
+      if (members.length < 2) continue
+      const pad = 0.25 * k
+      const x0 = Math.min(...members.map((m) => Math.min(m.rect.x0, m.labelRect?.x0 ?? m.rect.x0))) - pad
+      const x1 = Math.max(...members.map((m) => Math.max(m.rect.x1, m.labelRect?.x1 ?? m.rect.x1))) + pad
+      const y0 = Math.min(...members.map((m) => Math.min(m.rect.y0, m.labelRect?.y0 ?? m.rect.y0))) - pad
+      const y1 = Math.max(...members.map((m) => Math.max(m.rect.y1, m.labelRect?.y1 ?? m.rect.y1))) + pad
+      diag.box(page, (x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, {
+        transparent: true,
+        line: COLOR_PEER_LINK,
+        weight: 0.012,
+        pattern: 2
+      })
+      const lh = diag.textHeight(page, p.label, 6)
+      const lw = textWidthIn(p.label, 6, k) + 0.2 * k
+      diag.text(page, x0 + lw / 2 + 0.05 * k, y0 - lh / 2, lw, lh, p.label, { fontPt: 6, color: COLOR_PEER_LINK, bold: true })
+      bracketsDrawn += 1
+    }
+
     // ── links ──
     const portLabelRects: Array<Rect & { owner: string }> = []
     const portPt = 4
+    let peerLinksDrawn = 0
+    let serverLinesDrawn = 0
     for (const e of spec.edges) {
       const a = placed.get(e.source)
       const b = placed.get(e.target)
@@ -465,11 +530,13 @@ export function buildTopologyDiagram(
       }
       const la = landings.get(`${e.id}|${e.source}`)!
       const lb = landings.get(`${e.id}|${e.target}`)!
-      const ipn = a.node.role === 'ipn' || b.node.role === 'ipn'
+      const kind = edgeKindOf(e, a, b)
+      if (kind === 'vpc-peer-link') peerLinksDrawn += 1
+      if (kind === 'server') serverLinesDrawn += 1
       diag.line(page, la.x, la.y, lb.x, lb.y, {
-        color: ipn ? COLOR_IPN : COLOR_FABRIC,
-        weight: 0.014,
-        pattern: ipn ? 2 : 1
+        color: kind === 'ipn' ? COLOR_IPN : kind === 'vpc-peer-link' ? COLOR_PEER_LINK : kind === 'server' ? COLOR_SERVER : COLOR_FABRIC,
+        weight: kind === 'vpc-peer-link' ? 0.02 : kind === 'server' ? 0.01 : 0.014,
+        pattern: kind === 'ipn' ? 2 : 1
       })
       if (!pointTouchesRect(la.x, la.y, a.rect) || !pointTouchesRect(lb.x, lb.y, b.rect)) {
         pageProblems.push(`link ${e.id}: endpoint does not touch a device panel`)
@@ -482,12 +549,22 @@ export function buildTopologyDiagram(
       const nx = -uy
       const ny = ux
 
-      if (drawEdgeLabels && e.label) {
-        const lh = diag.textHeight(page, e.label, 6)
-        const lw = textWidthIn(e.label, 6, k) + 0.5 * k
-        diag.text(page, la.x + dx * 0.5 + nx * 0.12 * k, la.y + dy * 0.5 + ny * 0.12 * k, lw, lh, e.label, {
+      // Peer-link bundles are always labelled (they are few) and carry their
+      // ports in that one label — two per-end labels would collide in the
+      // gap between neighbouring leaves; server lines are never labelled
+      // (decision 8).
+      let label = e.label
+      if (kind === 'vpc-peer-link' && e.ports.length > 0) {
+        const pa = collapsePorts(e.ports.map((p) => p.a))
+        const pb = collapsePorts(e.ports.map((p) => p.b))
+        label = `${label} · ${pa === pb ? pa : `${pa} ↔ ${pb}`}`
+      }
+      if (kind !== 'server' && label && (drawEdgeLabels || kind === 'vpc-peer-link')) {
+        const lh = diag.textHeight(page, label, 6)
+        const lw = textWidthIn(label, 6, k) + 0.5 * k
+        diag.text(page, la.x + dx * 0.5 + nx * 0.12 * k, la.y + dy * 0.5 + ny * 0.12 * k, lw, lh, label, {
           fontPt: 6,
-          color: COLOR_FABRIC
+          color: kind === 'vpc-peer-link' ? COLOR_PEER_LINK : COLOR_FABRIC
         })
       }
 
@@ -513,7 +590,7 @@ export function buildTopologyDiagram(
         diag.text(page, px, py, lw, lh, text, { fontPt: portPt, color: COLOR_MUTED })
         portLabelRects.push({ x0: px - lw / 2, y0: py - lh / 2, x1: px + lw / 2, y1: py + lh / 2, owner: nodeId })
       }
-      if (e.ports.length > 0) {
+      if (e.ports.length > 0 && kind !== 'server' && kind !== 'vpc-peer-link') {
         placePort(e.source, la, collapsePorts(e.ports.map((p) => p.a)), ux, uy)
         placePort(e.target, lb, collapsePorts(e.ports.map((p) => p.b)), -ux, -uy)
       }
@@ -567,7 +644,7 @@ export function buildTopologyDiagram(
     diag.line(page, mSide, pageH - titleH, pageW - mSide, pageH - titleH, { color: '#BFBFBF', weight: 0.008 })
 
     // ── legend (bottom-left) ──
-    const legendW = 3.7 * k
+    const legendW = 4.6 * k
     const legendH = (P_FOOTER_H - 0.35) * k
     const lx = mSide + legendW / 2
     const ly = 0.2 * k + legendH / 2
@@ -576,28 +653,27 @@ export function buildTopologyDiagram(
     const rows: Array<[string, string, number]> = [
       [uniformEdgeLabel ? `Fabric link (spine ↔ leaf) — every link ${uniformEdgeLabel}` : 'Fabric link (spine ↔ leaf); label = links × speed', COLOR_FABRIC, 1],
       ['Inter-pod link (IPN), dashed', COLOR_IPN, 2],
+      ...(peerLinksDrawn ? ([['vPC peer-link (leaf ↔ leaf), red', COLOR_PEER_LINK, 1]] as Array<[string, string, number]>) : []),
+      ...(bracketsDrawn ? ([['vPC pair without a peer-link (bracket)', COLOR_PEER_LINK, 2]] as Array<[string, string, number]>) : []),
+      ...(serverLinesDrawn ? ([['Server NIC (one line per NIC; symbol per leaf or per vPC pair)', COLOR_SERVER, 1]] as Array<[string, string, number]>) : []),
       ...(smartMark ? ([['Purple mark on a panel = smart switch (DPU)', '#7030A0', 1]] as Array<[string, string, number]>) : [])
     ]
+    // Up to six rows (Phase 14 added peer-link / bracket / server) at a
+    // 0.15 in pitch fit the 1.15 in box; the panel-kind note moved to Notes.
     rows.forEach(([txt, col, pat], i) => {
-      const ry = ly + legendH / 2 - 0.37 * k - i * 0.22 * k
+      const ry = ly + legendH / 2 - 0.3 * k - i * 0.15 * k
       diag.line(page, lx - legendW / 2 + 0.12 * k, ry, lx - legendW / 2 + 0.62 * k, ry, { color: col, weight: 0.014, pattern: pat })
-      diag.text(page, lx + 0.33 * k, ry, legendW - 0.85 * k, 0.17 * k, txt, { fontPt: 6, align: 'left' })
+      diag.text(page, lx + 0.33 * k, ry, legendW - 0.85 * k, 0.14 * k, txt, { fontPt: 5.5, align: 'left' })
     })
     const kinds = new Set(spec.nodes.map((n) => n.panel.kind))
     const kindText = [
       kinds.has('master') && 'Cisco stencil masters',
       kinds.has('image') && 'product photos',
-      kinds.has('schematic') && 'generated schematic panels'
+      kinds.has('schematic') && 'generated schematic panels',
+      kinds.has('server-box') && 'generic server boxes'
     ]
       .filter(Boolean)
       .join(' · ')
-    if (kindText) {
-      diag.text(page, lx, ly - legendH / 2 + 0.14 * k, legendW - 0.2 * k, 0.17 * k, `Device panels: ${kindText}`, {
-        fontPt: 6,
-        align: 'left',
-        color: COLOR_MUTED
-      })
-    }
 
     // ── notes (bottom-right) ──
     const notesW = 5.8 * k
@@ -606,7 +682,8 @@ export function buildTopologyDiagram(
     const noteLines = [
       'Notes',
       ...(input.substitutions.length ? input.substitutions : ['No stencil substitutions.']),
-      ...pageProblems.filter((p) => p.includes('omitted'))
+      ...pageProblems.filter((p) => p.includes('omitted')),
+      ...(kindText ? [`Device panels: ${kindText}`] : [])
     ]
     const shown = noteLines.slice(0, 6)
     if (noteLines.length > 6) shown.push(`… ${noteLines.length - 6} more (see the Export tab)`)

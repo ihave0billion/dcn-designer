@@ -32,7 +32,11 @@ import {
   type InputMode
 } from '@/schemas/project'
 import type { Switch } from '@/schemas/switches'
-import { loadSwitchesFile, loadIpnRouters, type IpnRouterFileEntry } from '@/lib/library-io'
+import type { Server } from '@/schemas/servers'
+import { effectiveVpc, FABRIC_MODE_LABEL, PEER_LINK_MEMBERS_MAX, PEER_LINK_MEMBERS_MIN, type FabricMode } from '@/schemas/project'
+import { loadSwitchesFile, loadIpnRouters, type IpnRouterFileEntry,
+  loadServersFile
+} from '@/lib/library-io'
 import { useWorkspace } from '@/state/WorkspaceContext'
 
 interface RequirementsViewProps {
@@ -64,6 +68,7 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
   const [saveOk, setSaveOk] = useState(false)
   const [switches, setSwitches] = useState<Switch[]>([])
   const [ipnRouters, setIpnRouters] = useState<IpnRouterFileEntry[]>([])
+  const [servers, setServers] = useState<Server[]>([])
   const [librarySnoozed, setLibrarySnoozed] = useState<boolean>(() => {
     return localStorage.getItem(LIBRARY_REVIEW_KEY(projectPath)) === '1'
   })
@@ -87,7 +92,13 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
     loadIpnRouters(workspacePath)
       .then((routers) => setIpnRouters(routers))
       .catch(() => setIpnRouters([]))
+    // Phase 14 — server models for the tier's "Show servers" symbol.
+    loadServersFile(workspacePath)
+      .then((file) => setServers(file.servers))
+      .catch(() => setServers([]))
   }, [workspacePath])
+
+  const vpc = useMemo(() => effectiveVpc(form.fabric), [form.fabric])
 
   const leafCandidates = useMemo(
     () => switches.filter((s) => s.role === 'leaf' || s.role === 'both'),
@@ -396,13 +407,14 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                     <TableHead className="w-28">Switches</TableHead>
                     <TableHead>Leaf model</TableHead>
                     <TableHead className="w-32">Uplink override (G)</TableHead>
+                    <TableHead className="w-44">Server model</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {form.tiers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                         No tiers yet. Add a row to describe a leaf-side speed tier.
                       </TableCell>
                     </TableRow>
@@ -480,6 +492,27 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                               })
                             }
                           />
+                        </TableCell>
+                        <TableCell>
+                          {/* Phase 14 — only the Topology "Show servers" symbol reads this. */}
+                          <Select
+                            value={tier.server_model_id ?? '__none'}
+                            onValueChange={(v) =>
+                              patchTier(setForm, idx, { server_model_id: v === '__none' ? null : v })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="(generic)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none">(generic server)</SelectItem>
+                              {servers.map((sv) => (
+                                <SelectItem key={sv.id} value={sv.id}>
+                                  {sv.model_display} · {sv.ports.map((pg) => `${pg.count}×${pg.speed_g}G`).join(' + ') || 'no NICs'}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                         <TableCell>
                           <Button
@@ -582,6 +615,75 @@ export function RequirementsView({ initial, projectPath, onSaved }: Requirements
                   </span>
                 )}
             </p>
+
+            {/* ── Fabric mode + vPC leaf pairs (Phase 14) ─────────────── */}
+            <div className="border-t pt-4 space-y-3">
+              <div className="grid grid-cols-3 gap-4">
+                <Field label="Fabric mode">
+                  <Select
+                    value={form.fabric.mode}
+                    onValueChange={(v) => patch('fabric', { ...form.fabric, mode: v as FabricMode })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(FABRIC_MODE_LABEL) as FabricMode[]).map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {FABRIC_MODE_LABEL[m]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Peer-link members">
+                  <Input
+                    type="number"
+                    min={PEER_LINK_MEMBERS_MIN}
+                    max={PEER_LINK_MEMBERS_MAX}
+                    disabled={!vpc.peer_link}
+                    value={form.fabric.peer_link_members}
+                    onChange={(e) =>
+                      patch('fabric', {
+                        ...form.fabric,
+                        peer_link_members: Math.min(
+                          PEER_LINK_MEMBERS_MAX,
+                          Math.max(PEER_LINK_MEMBERS_MIN, Number(e.target.value) || PEER_LINK_MEMBERS_MIN)
+                        )
+                      })
+                    }
+                  />
+                </Field>
+                <div className="space-y-2 pt-6">
+                  <label className={`flex items-center gap-2 text-sm ${form.fabric.mode === 'nxos-evpn' ? 'cursor-pointer' : 'opacity-60'}`}>
+                    <Checkbox
+                      checked={vpc.peer_link}
+                      disabled={form.fabric.mode !== 'nxos-evpn'}
+                      onCheckedChange={(v) => patch('fabric', { ...form.fabric, peer_link_enabled: !!v })}
+                    />
+                    vPC peer-link
+                  </label>
+                  <label className={`flex items-center gap-2 text-sm ${form.fabric.mode === 'nxos-evpn' && vpc.peer_link ? 'cursor-pointer' : 'opacity-60'}`}>
+                    <Checkbox
+                      checked={vpc.port_channel}
+                      disabled={form.fabric.mode !== 'nxos-evpn' || !vpc.peer_link}
+                      onCheckedChange={(v) => patch('fabric', { ...form.fabric, peer_link_port_channel: !!v })}
+                    />
+                    Port-channel
+                  </label>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {form.fabric.mode === 'nxos-classic' &&
+                  'Classic vPC: every leaf pair gets a peer-link in a port-channel (mandatory).'}
+                {form.fabric.mode === 'nxos-evpn' &&
+                  'VXLAN EVPN: the peer-link and its port-channel are optional (both on by default).'}
+                {form.fabric.mode === 'aci' &&
+                  'ACI: leaf pairs are logical only — no peer-link, no port-channel; the topology shows a bracket.'}
+                {vpc.peer_link &&
+                  ` The peer-link takes ${vpc.members} port${vpc.members === 1 ? '' : 's'} per leaf from the uplink group (first ports; spine uplinks then use the last ones) — the solver reduces uplinks per leaf if needed and warns.`}
+              </p>
+            </div>
 
             {/* ── ACI Multi-Pod (Phase 9b) ─────────────────────────── */}
             <div className="border-t pt-4 space-y-3">
@@ -897,7 +999,8 @@ function addTier(setForm: React.Dispatch<React.SetStateAction<RequirementsFile>>
         endpoint_count: null,
         switch_count: null,
         leaf_model_id: null,
-        override_uplink_speed_g: null
+        override_uplink_speed_g: null,
+        server_model_id: null
       }
     ]
   }))

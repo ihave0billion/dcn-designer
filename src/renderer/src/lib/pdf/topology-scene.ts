@@ -6,9 +6,12 @@ import {
   TILE_H,
   TILE_W,
   type Fabric,
-  type Orientation
+  type Orientation,
+  type SceneEdgeKind,
+  type SceneNodeKind
 } from '@/lib/topology-hierarchy'
 import { resolveScenePositions } from '@/lib/topology-scene-positions'
+import type { ServerInfoResolver } from '@/lib/server-symbols'
 
 // Phase 13 — the PDF Topology page(s), built from the SAME scene geometry
 // as the Topology tab and the Visio export (device level, one page per
@@ -32,6 +35,8 @@ export const MAX_PANEL_H = TILE_H - 24
 
 export interface PdfSceneNode {
   id: string
+  /** Phase 14 — 'server' tiles are the Show-servers symbols. */
+  kind: SceneNodeKind
   label: string
   sublabel: string | null
   role: TopologyRole | null
@@ -52,6 +57,8 @@ export interface PdfSceneNode {
 
 export interface PdfSceneEdge {
   id: string
+  /** Phase 14 — fabric / ipn / vpc-peer-link (red) / server (thin). */
+  kind: SceneEdgeKind
   source: string
   target: string
   x1: number
@@ -63,6 +70,16 @@ export interface PdfSceneEdge {
   dashed: boolean
 }
 
+/** Phase 14 — a vPC pair drawn as a bracket (no peer-link between the members). */
+export interface PdfScenePair {
+  id: string
+  label: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface PdfScenePage {
   title: string
   subtitle: string
@@ -71,7 +88,10 @@ export interface PdfScenePage {
   height: number
   nodes: PdfSceneNode[]
   edges: PdfSceneEdge[]
-  counts: Record<'spine' | 'leaf' | 'ipn', number>
+  pairs: PdfScenePair[]
+  counts: Record<'spine' | 'leaf' | 'ipn' | 'server', number>
+  /** Phase 14 — peer-link bundles drawn on this page. */
+  peerLinks: number
   /** Set when the wiring would obscure the page; edges are then not drawn. */
   edgesOmitted: { links: number; pairs: number } | null
   custom: boolean
@@ -87,7 +107,16 @@ export interface PdfSceneOptions {
   maxEdges?: number
   /** Tiles per row for the automatic layout on paper (the canvas uses 40). */
   rowMax?: number
+  /** Phase 14 — draw the Show-servers symbols (topology_layout.yaml show_servers). */
+  showServers?: boolean
+  serverInfo?: ServerInfoResolver
 }
+
+/** Server symbol footprint (a generic 1RU box when there is no artwork). */
+export const SERVER_W = 64
+export const SERVER_H = 20
+/** Padding of the pair bracket around its member tiles. */
+export const PAIR_PAD = 6
 
 /** 14 tiles across Letter landscape keeps a 15-char hostname legible under each panel. */
 export const PDF_ROW_MAX = 14
@@ -132,7 +161,12 @@ export function buildPdfScenePages(
   const pages: PdfScenePage[] = []
 
   for (const fabric of fabrics) {
-    const scene = buildScene(graph, fabrics, { kind: 'devices', fabricId: fabric.id }, { aggregate: true })
+    const scene = buildScene(
+      graph,
+      fabrics,
+      { kind: 'devices', fabricId: fabric.id },
+      { aggregate: true, showServers: opts.showServers, serverInfo: opts.serverInfo }
+    )
     // Saved drag positions win as-is; the automatic layout is re-wrapped for
     // paper so a wide fabric becomes rows instead of a thin strip.
     let { positions, custom } = resolveScenePositions(scene, layoutFile, orientation)
@@ -141,14 +175,17 @@ export function buildPdfScenePages(
     }
 
     const nodes: PdfSceneNode[] = []
-    const counts = { spine: 0, leaf: 0, ipn: 0 }
+    const counts = { spine: 0, leaf: 0, ipn: 0, server: 0 }
     for (const n of scene.nodes) {
       const p = positions.get(n.id) ?? { x: 0, y: 0 }
-      const modelId = n.device?.model_id ?? (n.kind === 'ipn' ? (n.sublabel ?? 'unknown') : 'unknown')
-      const ru = opts.ruOf?.(modelId) ?? 1
+      const modelId =
+        n.kind === 'server'
+          ? (n.server?.modelId ?? 'server')
+          : n.device?.model_id ?? (n.kind === 'ipn' ? (n.sublabel ?? 'unknown') : 'unknown')
+      const ru = n.kind === 'server' ? (n.server?.ru ?? 1) : opts.ruOf?.(modelId) ?? 1
       const img = opts.images?.get(modelId) ?? null
-      let w = PANEL_W
-      let h = Math.max(MIN_PANEL_H, RU_PX * ru)
+      let w = n.kind === 'server' ? SERVER_W : PANEL_W
+      let h = n.kind === 'server' ? Math.max(SERVER_H, RU_PX * ru) : Math.max(MIN_PANEL_H, RU_PX * ru)
       if (img) {
         // Keep the raster's shape: a front panel is ~11:1, an isometric photo ~1.25:1.
         h = Math.max(MIN_PANEL_H, w / img.aspect)
@@ -163,8 +200,10 @@ export function buildPdfScenePages(
       const x = cx - w / 2
       const y = cy - h / 2
       if (n.role) counts[n.role] += 1
+      if (n.kind === 'server') counts.server += 1
       nodes.push({
         id: n.id,
+        kind: n.kind,
         label: n.label,
         sublabel: n.sublabel,
         role: n.role,
@@ -184,6 +223,7 @@ export function buildPdfScenePages(
 
     const edges: PdfSceneEdge[] = []
     let omitted: PdfScenePage['edgesOmitted'] = null
+    const peerLinks = scene.edges.filter((e) => e.kind === 'vpc-peer-link').length
     if (scene.edges.length > maxEdges) {
       omitted = { links: scene.edges.reduce((a, e) => a + e.count, 0), pairs: scene.edges.length }
     } else {
@@ -199,6 +239,7 @@ export function buildPdfScenePages(
         const p2 = rectEdgePoint(bcx, bcy, b.w / 2, b.h / 2, acx, acy)
         edges.push({
           id: e.id,
+          kind: e.kind,
           source: e.source,
           target: e.target,
           x1: p1.x,
@@ -212,6 +253,19 @@ export function buildPdfScenePages(
       }
     }
 
+    // Phase 14 — bracket around the two tiles of a pair that has no peer-link.
+    const pairs: PdfScenePair[] = []
+    for (const p of scene.pairs) {
+      if (!p.bracket) continue
+      const tiles = p.memberIds.map((id) => positions.get(id)).filter((t): t is NonNullable<typeof t> => !!t)
+      if (tiles.length < 2) continue
+      const x0 = Math.min(...tiles.map((t) => t.x)) - PAIR_PAD
+      const y0 = Math.min(...tiles.map((t) => t.y)) - PAIR_PAD
+      const x1 = Math.max(...tiles.map((t) => t.x + TILE_W)) + PAIR_PAD
+      const y1 = Math.max(...tiles.map((t) => t.y + TILE_H)) + PAIR_PAD
+      pairs.push({ id: p.id, label: p.label, x: x0, y: y0, w: x1 - x0, h: y1 - y0 })
+    }
+
     // Page extent from the geometry (labels included), padded, origin shifted to 0.
     let minX = Infinity
     let minY = Infinity
@@ -222,6 +276,12 @@ export function buildPdfScenePages(
       maxX = Math.max(maxX, n.x + n.w)
       minY = Math.min(minY, n.labelAbove ? n.labelY - 12 : n.y)
       maxY = Math.max(maxY, n.labelAbove ? n.y + n.h : n.labelY + 12)
+    }
+    for (const p of pairs) {
+      minX = Math.min(minX, p.x)
+      minY = Math.min(minY, p.y)
+      maxX = Math.max(maxX, p.x + p.w)
+      maxY = Math.max(maxY, p.y + p.h)
     }
     if (nodes.length === 0) {
       minX = minY = 0
@@ -241,6 +301,10 @@ export function buildPdfScenePages(
       e.x2 += dx
       e.y2 += dy
     }
+    for (const p of pairs) {
+      p.x += dx
+      p.y += dy
+    }
 
     pages.push({
       title: multi ? `Topology — ${fabric.label}` : 'Topology',
@@ -252,7 +316,9 @@ export function buildPdfScenePages(
       height: maxY - minY + PAGE_PAD * 2,
       nodes,
       edges,
+      pairs,
       counts,
+      peerLinks,
       edgesOmitted: omitted,
       custom
     })

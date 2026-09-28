@@ -14,7 +14,12 @@ export interface SwitchCapabilitiesSpec {
   aci_leaf?: boolean
   aci_spine?: boolean
   nxos?: boolean
+  // Phase 14 — a smart switch (integrated DPU) keeps its peer-link on the
+  // fastest uplink group even when that costs spine uplinks (decision 3).
+  smart_switch?: boolean
 }
+
+export type PortGroupName = 'uplink' | 'secondary_uplink' | 'primary'
 
 export interface SwitchSpec {
   id: string
@@ -25,6 +30,9 @@ export interface SwitchSpec {
   ru: number | null
   power_w: number | null
   capabilities: SwitchCapabilitiesSpec
+  // Phase 14 — which port group the library's `peer_link_ports` template
+  // names (null/undefined = the default rule in vpc.ts chooses).
+  peer_link_group?: PortGroupName | null
 }
 
 export interface ServerSpec {
@@ -121,7 +129,14 @@ export interface TierRequest {
   switch_count: number | null
   leaf_model_id: string | null // null → row is skipped
   override_uplink_speed_g: number | null
+  // Phase 14 — server model of the tier (display only: the Topology
+  // "Show servers" symbol). Passed through to TierResult.
+  server_model_id?: string | null
 }
+
+// Phase 14 — vPC leaf pairs. See renderer/schemas/project.ts FabricSchema
+// for the mode semantics; the solver only needs the effective reservation.
+export type FabricMode = 'nxos-classic' | 'nxos-evpn' | 'aci'
 
 export interface FabricRequest {
   uplinks_per_leaf: number
@@ -136,6 +151,15 @@ export interface FabricRequest {
   // MULTIPOD_LICENSE_BLOCKED. UI toggle ships in Phase 9b.
   aci_multipod_allowed?: boolean
   ipn_router_model_id?: string | null
+  // Phase 14 — vPC leaf pairs. `mode` defaults to 'nxos-evpn';
+  // `peer_link_members` (1–4, default 2) ports per leaf are reserved for
+  // the peer-link when the mode has one (classic always, EVPN when
+  // `peer_link_enabled`, never ACI). The solver reduces uplinks_per_leaf
+  // to what is left and warns.
+  mode?: FabricMode
+  peer_link_enabled?: boolean
+  peer_link_members?: number
+  peer_link_port_channel?: boolean
 }
 
 export interface RackInventoryEntry {
@@ -179,6 +203,8 @@ export interface TierResult {
   host_bw_g: number
   uplink_bw_g: number
   xor_status: 'ok' | 'empty' | 'both-set' | 'no-model' | 'unknown-model'
+  // Phase 14 — pass-through of TierRequest.server_model_id (display only).
+  server_model_id?: string | null
 }
 
 export interface SpineResult {
@@ -262,6 +288,10 @@ export type WarningCode =
   | 'MULTIPOD_LICENSE_BLOCKED'
   | 'IPN_PORTS_INSUFFICIENT'
   | 'IPN_MODEL_NOT_SELECTED'
+  // Phase 14 — vPC leaf pairs
+  | 'VPC_PEER_LINK_RESERVED'
+  | 'VPC_UPLINKS_REDUCED'
+  | 'VPC_ODD_LEAF'
 
 export interface SolverWarning {
   code: WarningCode
@@ -344,6 +374,29 @@ export interface DesignCandidate {
   computed_oversub_label: string
 }
 
+// Phase 14 — the vPC view of a design: effective mode/peer-link settings,
+// the uplink budget after the peer-link reservation, and the solver's leaf
+// pairing (device ids from rack_layout). `pairs` is the seed for the
+// per-project leaf_pairs.yaml; consumers prefer that file when present.
+export interface VpcPair {
+  id: string // "pair-1", "pair-2", …
+  members: [string, string]
+}
+
+export interface VpcSummary {
+  mode: FabricMode
+  peer_link: boolean
+  port_channel: boolean
+  /** Cables per peer-link (0 when there is no peer-link). */
+  members: number
+  configured_uplinks_per_leaf: number
+  /** Uplinks per leaf actually used for the spine math. */
+  effective_uplinks_per_leaf: number
+  pairs: VpcPair[]
+  /** Leaves that could not be paired (odd leaf out of a tier). */
+  unpaired: string[]
+}
+
 export interface DesignResult {
   schema_version: 1
   summary: DesignSummary
@@ -363,4 +416,6 @@ export interface DesignResult {
   candidates: DesignCandidate[]
   primary_candidate_id: CandidateId
   committed_candidate_id: CandidateId
+  // Phase 14 — optional so design.yaml files written before v1.4 still parse.
+  vpc?: VpcSummary
 }

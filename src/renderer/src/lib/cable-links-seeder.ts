@@ -3,8 +3,11 @@ import { IPN_PORTS_PER_SPINE_PER_IPN } from '@domain'
 import type { Switch } from '@/schemas/switches'
 import type { PatchPanel } from '@/schemas/patch-panels'
 import type { CableLink } from '@/schemas/cable-links'
+import type { LeafPair } from '@/schemas/leaf-pairs'
 import { expandPortTemplate } from './port-template'
 import { resolvePatchPanel } from './patch-panel-resolver'
+import { peerLinkGroupFor } from '@domain'
+import { switchToSpec } from './solver-bridge'
 
 // Auto-seed the fabric uplink wiring (leaf → spine only) from a fresh
 // design.yaml. Server ↔ leaf links are NOT seeded per Phase 6 Q2 — host
@@ -33,6 +36,10 @@ export interface SeedCableLinksInput {
   fabric: { uplinks_per_leaf: number; uplinks_per_spine: number }
   breakoutPairs: BreakoutPair[]
   patchPanels: PatchPanel[]
+  // Phase 14 — vPC peer-links. Omitted = read design.vpc (members, pairs);
+  // an explicit `pairs` (the leaf_pairs.yaml fork) wins over the solver's.
+  vpc?: { peer_link: boolean; port_channel: boolean; members: number } | null
+  pairs?: LeafPair[] | null
 }
 
 export interface SeedCableLinksResult {
@@ -131,6 +138,55 @@ function leafUplinkPorts(
   }
 }
 
+// Phase 14 — the ports a leaf spends on its vPC peer-link (decision 3):
+// the library's `peer_link_ports` template when set, else the FIRST ports of
+// the group `peerLinkGroupFor` picks (the tier's highest-speed uplink group
+// when it still has room for the spine uplinks, else the leaf's other uplink
+// group). `uplinksPerLeaf` is the configured value the rule checks against.
+export function peerLinkPorts(sw: Switch, members: number, uplinksPerLeaf = 0): { ports: string[]; speed_g: number } {
+  if (members <= 0) return { ports: [], speed_g: 0 }
+  if (sw.peer_link_ports) {
+    let ports: string[]
+    try {
+      ports = expandPortTemplate(sw.peer_link_ports)
+    } catch {
+      ports = []
+    }
+    // A template that names ports of another group takes that group's speed.
+    let speed_g = (sw.uplink ?? sw.primary).speed_g
+    const owner = [sw.uplink, sw.secondary_uplink, sw.primary].find((g) => {
+      if (!g) return false
+      try {
+        const all = expandPortTemplate(g.naming_template)
+        return ports.length > 0 && ports.every((p) => all.includes(p))
+      } catch {
+        return false
+      }
+    })
+    if (owner) speed_g = owner.speed_g
+    return { ports: ports.slice(0, members), speed_g }
+  }
+  const choice = peerLinkGroupFor(switchToSpec(sw), members, uplinksPerLeaf)
+  const group = (choice.group === 'uplink' ? sw.uplink : choice.group === 'secondary_uplink' ? sw.secondary_uplink : sw.primary) ?? sw.primary
+  let ports: string[]
+  try {
+    ports = expandPortTemplate(group.naming_template)
+  } catch {
+    ports = []
+  }
+  return { ports: ports.slice(0, members), speed_g: group.speed_g }
+}
+
+/** Default peer-link template shown as the library field's placeholder. */
+export function defaultPeerLinkTemplate(sw: Switch, members = 2, uplinksPerLeaf = 0): string {
+  const { ports } = peerLinkPorts({ ...sw, peer_link_ports: null }, members, uplinksPerLeaf)
+  if (ports.length === 0) return ''
+  const m = /^(.*?)(\d+)$/.exec(ports[0])
+  const last = /^(.*?)(\d+)$/.exec(ports[ports.length - 1])
+  if (m && last && m[1] === last[1]) return `${m[1]}{${m[2]}..${last[2]}}`
+  return ports.join(', ')
+}
+
 function spinePrimaryPorts(spineModelId: string, switches: Switch[]): string[] {
   const sw = switches.find((s) => s.id === spineModelId)
   if (!sw) return []
@@ -157,6 +213,15 @@ export function seedCableLinks(input: SeedCableLinksInput): SeedCableLinksResult
   const { design, switches, fabric, patchPanels } = input
   const notes: string[] = []
   const links: CableLink[] = []
+
+  // Phase 14 — peer-link settings + pairs (fork file wins over the solver).
+  const vpc = input.vpc === undefined ? design.vpc ?? null : input.vpc
+  const peerLinkOn = !!vpc && vpc.peer_link && vpc.members > 0
+  const pairs: LeafPair[] = input.pairs ?? design.vpc?.pairs ?? []
+  const reservedByLeaf = new Map<string, string[]>()
+  // The group rule checks against the CONFIGURED uplinks (what the user asked
+  // for), exactly as the solver's budget did.
+  const configuredUplinks = design.vpc?.configured_uplinks_per_leaf ?? fabric.uplinks_per_leaf
 
   if (!design.spine || design.spine.spines_needed === 0) {
     notes.push('No spine sized — cable_links seed skipped.')
@@ -241,7 +306,16 @@ export function seedCableLinks(input: SeedCableLinksInput): SeedCableLinksResult
       tier?.effective_uplink_choice ?? 'primary'
     const speed_g =
       tier?.override_uplink_speed_applied_g ?? tier?.effective_uplink_speed_g ?? 0
-    const leafPorts = leafUplinkPorts(leaf.model_id, choice, switches)
+    let leafPorts = leafUplinkPorts(leaf.model_id, choice, switches)
+    // Phase 14 — the peer-link owns the first ports of the group; spine
+    // uplinks are then taken from the END of what remains (decision 3).
+    const leafSw = switches.find((s) => s.id === leaf.model_id)
+    if (peerLinkOn && leafSw && pairs.some((p) => p.members.includes(leaf.device_id))) {
+      const reserved = peerLinkPorts(leafSw, vpc!.members, configuredUplinks).ports
+      reservedByLeaf.set(leaf.device_id, reserved)
+      const remaining = leafPorts.filter((p) => !reserved.includes(p))
+      leafPorts = remaining.slice(Math.max(0, remaining.length - uplinks_per_leaf))
+    }
     if (leafPorts.length < uplinks_per_leaf) {
       notes.push(
         `Leaf ${leaf.device_id} (${leaf.model_id}) has only ${leafPorts.length} ports in its uplink template — needed ${uplinks_per_leaf}. Seeded what fits.`
@@ -275,6 +349,7 @@ export function seedCableLinks(input: SeedCableLinksInput): SeedCableLinksResult
       linkSerial += 1
       links.push({
         id: `link-${linkSerial.toString().padStart(4, '0')}`,
+        kind: 'uplink',
         device_a: { rack: spine.rack, device_id: spine.device_id, port: spinePort },
         device_b: { rack: leaf.rack, device_id: leaf.device_id, port: leafPort },
         speed_g,
@@ -284,6 +359,49 @@ export function seedCableLinks(input: SeedCableLinksInput): SeedCableLinksResult
         length_m: null,
         notes: null
       })
+    }
+  }
+
+  // ── vPC peer-links (Phase 14, decision 6) ─────────────────────────
+  // `members` cables between the two leaves of every pair, each on its
+  // own peer-link port (same port on both ends when the models match).
+  if (peerLinkOn) {
+    const leafById = new Map(leaves.map((l) => [l.device_id, l]))
+    const memberNote = vpc!.port_channel ? 'vPC peer-link (port-channel)' : 'vPC peer-link'
+    for (const pair of pairs) {
+      const a = leafById.get(pair.members[0])
+      const b = leafById.get(pair.members[1])
+      if (!a || !b) {
+        notes.push(`Pair ${pair.id} references a leaf that is not in the design — peer-link not seeded.`)
+        continue
+      }
+      const swA = switches.find((s) => s.id === a.model_id)
+      const swB = switches.find((s) => s.id === b.model_id)
+      if (!swA || !swB) {
+        notes.push(`Pair ${pair.id}: leaf model not in the library — peer-link not seeded.`)
+        continue
+      }
+      const pa = peerLinkPorts(swA, vpc!.members, configuredUplinks)
+      const pb = peerLinkPorts(swB, vpc!.members, configuredUplinks)
+      const n = Math.min(pa.ports.length, pb.ports.length)
+      if (n < vpc!.members) {
+        notes.push(`Pair ${pair.id}: only ${n} peer-link port${n === 1 ? '' : 's'} available — wanted ${vpc!.members}.`)
+      }
+      for (let k = 0; k < n; k++) {
+        linkSerial += 1
+        links.push({
+          id: `link-${linkSerial.toString().padStart(4, '0')}`,
+          kind: 'vpc-peer-link',
+          device_a: { rack: a.rack, device_id: a.device_id, port: pa.ports[k] },
+          device_b: { rack: b.rack, device_id: b.device_id, port: pb.ports[k] },
+          speed_g: Math.min(pa.speed_g, pb.speed_g),
+          optic_id: null,
+          patch_panel_id: null,
+          label: `${a.device_id}:${pa.ports[k]} ↔ ${b.device_id}:${pb.ports[k]}`,
+          length_m: null,
+          notes: memberNote
+        })
+      }
     }
   }
 
@@ -327,6 +445,7 @@ export function seedCableLinks(input: SeedCableLinksInput): SeedCableLinksResult
           linkSerial += 1
           links.push({
             id: `link-${linkSerial.toString().padStart(4, '0')}`,
+            kind: 'uplink',
             device_a: { rack: spine.rack, device_id: spine.device_id, port: spinePort },
             device_b: { rack: ip.rack, device_id: ip.device_id, port: ipnPort },
             speed_g: ipnLinkSpeed,

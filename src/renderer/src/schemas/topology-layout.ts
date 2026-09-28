@@ -42,7 +42,10 @@ export const TopologyLayoutFileSchema = z.object({
   scene_positions: z.array(TopologyScenePositionSchema).default([]),
   // Which layout engine wrote the file. Tile geometry changes bump this;
   // files from another generator are ignored (not deleted).
-  generator: z.string().nullable().default(null)
+  generator: z.string().nullable().default(null),
+  // Phase 14 — the Topology tab's "Show servers" checkbox. Saved here so
+  // the PDF and Visio exports draw exactly what the screen shows.
+  show_servers: z.boolean().default(false)
 })
 export type TopologyLayoutFile = z.infer<typeof TopologyLayoutFileSchema>
 

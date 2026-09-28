@@ -1,4 +1,4 @@
-import type { CableLink } from '@/schemas/cable-links'
+import { CableLinkKindSchema, type CableLink } from '@/schemas/cable-links'
 
 // Fixed-schema CSV round-trip for cable_links.yaml. The columns below
 // are what `Export CSV` writes and what `Import CSV` expects. Unknown
@@ -8,8 +8,12 @@ import type { CableLink } from '@/schemas/cable-links'
 // Per Phase 6 Q4: this is intentionally not a column-mapping UI — the
 // app produces and consumes the same shape so users can edit in Excel.
 
+// Phase 14: `kind` (uplink | vpc-peer-link) — optional on import, defaults
+// to uplink. For a peer-link both device columns name leaves; the column
+// names are kept for spreadsheet compatibility ("spine_*" = device A).
 const COLUMNS = [
   'id',
+  'kind',
   'spine_rack',
   'spine_device_id',
   'spine_port',
@@ -54,6 +58,7 @@ export function serializeCableLinksCsv(links: CableLink[]): string {
   const rows = links.map((l) =>
     [
       l.id,
+      l.kind ?? 'uplink',
       l.device_a.rack ?? '',
       l.device_a.device_id,
       l.device_a.port,
@@ -172,7 +177,15 @@ export function parseCableLinksCsv(
       result.rows_skipped_malformed += 1
       continue
     }
-    if (!valid.spineIds.has(spineDeviceId)) {
+    const kindParsed = CableLinkKindSchema.safeParse(cell('kind') || 'uplink')
+    if (!kindParsed.success) {
+      result.rows_skipped_malformed += 1
+      result.warnings.push(`Row ${r + 1}: unknown link kind "${cell('kind')}" — skipped.`)
+      continue
+    }
+    const kind = kindParsed.data
+    const aOk = kind === 'vpc-peer-link' ? valid.leafIds.has(spineDeviceId) : valid.spineIds.has(spineDeviceId)
+    if (!aOk) {
       result.rows_skipped_unknown_device += 1
       result.warnings.push(`Row ${r + 1}: unknown spine device "${spineDeviceId}" — skipped.`)
       continue
@@ -191,6 +204,7 @@ export function parseCableLinksCsv(
 
     result.links.push({
       id,
+      kind,
       device_a: {
         rack: cell('spine_rack') || null,
         device_id: spineDeviceId,

@@ -33,6 +33,7 @@ import {
   Maximize2,
   Minus,
   Plus,
+  Server as ServerIcon,
   X
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -51,12 +52,17 @@ import {
 import { useWorkspace } from '@/state/WorkspaceContext'
 import {
   loadCableLinks,
+  loadLeafPairs,
+  loadServersFile,
   loadSwitchesFile,
   loadTopologyLayout,
   saveTopologyLayout,
   deleteTopologyLayout,
   type CableLinksFile
 } from '@/lib/library-io'
+import type { Server } from '@/schemas/servers'
+import type { LeafPair } from '@/schemas/leaf-pairs'
+import { serverInfoResolver } from '@/lib/server-symbols'
 import {
   TOPOLOGY_LAYOUT_GENERATOR,
   type TopologyLayoutFile,
@@ -85,7 +91,8 @@ import {
   type Scene,
   type SceneEdge,
   type SceneLevel,
-  type SceneNode
+  type SceneNode,
+  type ScenePair
 } from '@/lib/topology-hierarchy'
 import { cn } from '@/lib/utils'
 import { resolveScenePositions, sceneKeyFor } from '@/lib/topology-scene-positions'
@@ -113,6 +120,20 @@ interface FanEdgeData extends Record<string, unknown> {
 type TileNode = RFNode<TileData, 'tile'>
 type FanEdge = RFEdge<FanEdgeData, 'fan'>
 
+// Phase 14 — a vPC pair without a peer-link is joined by a bracket drawn
+// as a non-interactive node behind its two tiles.
+interface BracketData extends Record<string, unknown> {
+  pair: ScenePair
+  w: number
+  h: number
+}
+type BracketNode = RFNode<BracketData, 'bracket'>
+type CanvasNode = TileNode | BracketNode
+
+/** The skill's peer-link red, shared with the PDF and Visio exports. */
+const PEER_LINK_COLOR = '#B85450'
+const BRACKET_PAD = 5
+
 const FIT = { padding: 0.12, duration: 300, maxZoom: 1.25 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -131,6 +152,10 @@ function TopologyCanvas({
   const [cableLinks, setCableLinks] = useState<CableLinksFile | null>(null)
   const [layoutFile, setLayoutFile] = useState<TopologyLayoutFile | null>(null)
   const [smartModels, setSmartModels] = useState<Set<string>>(() => new Set())
+  // Phase 14 — vPC pairs (fork file) + the server library for the symbols.
+  const [leafPairs, setLeafPairs] = useState<LeafPair[] | null>(null)
+  const [servers, setServers] = useState<Server[]>([])
+  const [showServers, setShowServers] = useState(false)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -145,7 +170,7 @@ function TopologyCanvas({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<TileNode>([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<FanEdge>([])
   const { fitView, zoomIn, zoomOut } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
@@ -158,7 +183,7 @@ function TopologyCanvas({
     setErr(null)
     ;(async () => {
       try {
-        const [designRaw, links, layout, switches] = await Promise.all([
+        const [designRaw, links, layout, switches, pairsFile, serversFile] = await Promise.all([
           window.dcn
             .fileExists(`${projectPath}/design.yaml`)
             .then((exists) =>
@@ -170,12 +195,17 @@ function TopologyCanvas({
           loadTopologyLayout(projectPath),
           // The library tells us which models are smart switches (DPU badge +
           // "smart-sw" nickname). Missing library = fall back to the SE1U pattern.
-          workspacePath ? loadSwitchesFile(workspacePath).catch(() => null) : Promise.resolve(null)
+          workspacePath ? loadSwitchesFile(workspacePath).catch(() => null) : Promise.resolve(null),
+          loadLeafPairs(projectPath).catch(() => null),
+          workspacePath ? loadServersFile(workspacePath).catch(() => null) : Promise.resolve(null)
         ])
         if (cancelled) return
         setDesign(designRaw)
         setCableLinks(links)
         setLayoutFile(layout)
+        setLeafPairs(pairsFile?.pairs ?? null)
+        setServers(serversFile?.servers ?? [])
+        setShowServers(layout?.show_servers ?? false)
         setSmartModels(
           new Set(
             (switches?.switches ?? [])
@@ -196,8 +226,10 @@ function TopologyCanvas({
 
   const graph: TopologyGraph = useMemo(() => {
     if (!design) return { nodes: [], edges: [], orphanDeviceIds: [] }
-    return applyNicknames(extractTopology(design, cableLinks?.links ?? []), smartModels)
-  }, [design, cableLinks, smartModels])
+    return applyNicknames(extractTopology(design, cableLinks?.links ?? [], leafPairs), smartModels)
+  }, [design, cableLinks, smartModels, leafPairs])
+
+  const serverInfo = useMemo(() => serverInfoResolver(design, servers), [design, servers])
 
   const fabrics = useMemo(() => buildFabrics(graph, fabricName), [graph, fabricName])
 
@@ -209,8 +241,8 @@ function TopologyCanvas({
   }, [fabrics, level])
 
   const scene: Scene = useMemo(
-    () => buildScene(graph, fabrics, level, { aggregate }),
-    [graph, fabrics, level, aggregate]
+    () => buildScene(graph, fabrics, level, { aggregate, showServers, serverInfo }),
+    [graph, fabrics, level, aggregate, showServers, serverInfo]
   )
 
   const filterClauses = useMemo(() => parseFilter(filterText), [filterText])
@@ -236,9 +268,9 @@ function TopologyCanvas({
         return dev ? matchesFilter(dev, filterClauses) : false
       })
     }
-    const rfNodes: TileNode[] = scene.nodes.map((n) => ({
+    const rfNodes: CanvasNode[] = scene.nodes.map((n) => ({
       id: n.id,
-      type: 'tile',
+      type: 'tile' as const,
       position: positions.get(n.id) ?? { x: 0, y: 0 },
       data: { scene: n, dimmed: isDimmed(n) },
       draggable: true,
@@ -247,6 +279,28 @@ function TopologyCanvas({
       width: TILE_W,
       height: TILE_H
     }))
+    // Phase 14 — brackets around pairs that have no peer-link (ACI / off).
+    for (const p of scene.pairs) {
+      if (!p.bracket) continue
+      const pts = p.memberIds.map((id) => positions.get(id)).filter((q): q is NonNullable<typeof q> => !!q)
+      if (pts.length < 2) continue
+      const x0 = Math.min(...pts.map((q) => q.x)) - BRACKET_PAD
+      const y0 = Math.min(...pts.map((q) => q.y)) - BRACKET_PAD
+      const w = Math.max(...pts.map((q) => q.x)) + TILE_W + BRACKET_PAD - x0
+      const h = Math.max(...pts.map((q) => q.y)) + TILE_H + BRACKET_PAD - y0
+      rfNodes.unshift({
+        id: `bracket:${p.id}`,
+        type: 'bracket' as const,
+        position: { x: x0, y: y0 },
+        data: { pair: p, w, h },
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        zIndex: -1,
+        width: w,
+        height: h
+      })
+    }
 
     // Parallel (non-aggregated) cables between the same pair fan out.
     const siblings = new Map<string, number>()
@@ -292,7 +346,8 @@ function TopologyCanvas({
   }, [level, goTo])
 
   const onNodeDoubleClick = useCallback(
-    (_e: React.MouseEvent, n: TileNode) => {
+    (_e: React.MouseEvent, n: CanvasNode) => {
+      if (n.type !== 'tile') return
       const next = drillInto(n.data.scene, level)
       if (next) goTo(next)
     },
@@ -325,7 +380,8 @@ function TopologyCanvas({
   }, [goUp, legendOpen, actionsOpen, selectedNodeId, selectedEdgeId])
 
   // ── Selection ───────────────────────────────────────────────────────
-  const onNodeClick = useCallback((_e: React.MouseEvent, n: TileNode) => {
+  const onNodeClick = useCallback((_e: React.MouseEvent, n: CanvasNode) => {
+    if (n.type !== 'tile') return
     setSelectedNodeId(n.id)
     setSelectedEdgeId(null)
   }, [])
@@ -354,10 +410,13 @@ function TopologyCanvas({
     nodesRef.current = nodes
   }, [nodes])
 
+  // Phase 14 — the file also carries the "Show servers" checkbox so the
+  // exports draw what the screen shows; it is only deleted when nothing
+  // (no positions, servers off) is left to remember.
   const writeLayout = useCallback(
-    async (scenePositions: TopologyScenePosition[]) => {
+    async (scenePositions: TopologyScenePosition[], serversOn: boolean = showServers) => {
       try {
-        if (scenePositions.length === 0) {
+        if (scenePositions.length === 0 && !serversOn) {
           await deleteTopologyLayout(projectPath)
           setLayoutFile(null)
           return
@@ -365,12 +424,13 @@ function TopologyCanvas({
         const now = new Date().toISOString()
         const next: TopologyLayoutFile = {
           schema_version: 1,
-          source: 'user',
+          source: scenePositions.length > 0 ? 'user' : 'auto',
           seeded_at: layoutFile?.seeded_at ?? now,
-          forked_at: layoutFile?.forked_at ?? now,
+          forked_at: scenePositions.length > 0 ? (layoutFile?.forked_at ?? now) : null,
           positions: [],
           scene_positions: scenePositions,
-          generator: TOPOLOGY_LAYOUT_GENERATOR
+          generator: TOPOLOGY_LAYOUT_GENERATOR,
+          show_servers: serversOn
         }
         await saveTopologyLayout(projectPath, next)
         setLayoutFile(next)
@@ -378,7 +438,21 @@ function TopologyCanvas({
         setErr(e instanceof Error ? e.message : String(e))
       }
     },
-    [layoutFile, projectPath]
+    [layoutFile, projectPath, showServers]
+  )
+
+  const savedPositions = useCallback(
+    (): TopologyScenePosition[] =>
+      layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR ? layoutFile.scene_positions : [],
+    [layoutFile]
+  )
+
+  const toggleShowServers = useCallback(
+    (on: boolean) => {
+      setShowServers(on)
+      void writeLayout(savedPositions(), on)
+    },
+    [writeLayout, savedPositions]
   )
 
   // Entries for other scenes survive; this scene is rewritten from the
@@ -388,16 +462,18 @@ function TopologyCanvas({
       layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR
         ? layoutFile.scene_positions.filter((p) => p.scene !== sceneKey)
         : []
-    const mine: TopologyScenePosition[] = nodesRef.current.map((n) => ({
-      scene: sceneKey,
-      node_id: n.id,
-      x: n.position.x,
-      y: n.position.y
-    }))
+    const mine: TopologyScenePosition[] = nodesRef.current
+      .filter((n) => n.type === 'tile')
+      .map((n) => ({
+        scene: sceneKey,
+        node_id: n.id,
+        x: n.position.x,
+        y: n.position.y
+      }))
     void writeLayout([...others, ...mine])
   }, [layoutFile, sceneKey, writeLayout])
 
-  const onNodeDragStop: OnNodeDrag<TileNode> = useCallback(() => {
+  const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback(() => {
     persistScene()
   }, [persistScene])
 
@@ -417,7 +493,7 @@ function TopologyCanvas({
     window.setTimeout(() => fitView(FIT), 60)
   }, [writeLayout, fitView])
 
-  const nodeTypes: NodeTypes = useMemo(() => ({ tile: TileRenderer }), [])
+  const nodeTypes: NodeTypes = useMemo(() => ({ tile: TileRenderer, bracket: BracketRenderer }), [])
   const edgeTypes: EdgeTypes = useMemo(() => ({ fan: FanEdgeRenderer }), [])
 
   // ── Render ──────────────────────────────────────────────────────────
@@ -433,6 +509,8 @@ function TopologyCanvas({
 
   const spineCount = graph.nodes.filter((n) => n.role === 'spine').length
   const leafCount = graph.nodes.filter((n) => n.role === 'leaf').length
+  const pairCount = graph.pairs?.length ?? 0
+  const peerLinkCount = graph.edges.filter((e) => e.kind === 'vpc-peer-link').length
   const anyCustom =
     layoutFile?.generator === TOPOLOGY_LAYOUT_GENERATOR && layoutFile.scene_positions.length > 0
   const legacyLayout = !!layoutFile && layoutFile.generator !== TOPOLOGY_LAYOUT_GENERATOR
@@ -467,6 +545,8 @@ function TopologyCanvas({
           {spineCount} spine{spineCount === 1 ? '' : 's'} · {leafCount} lea
           {leafCount === 1 ? 'f' : 'ves'} · {graph.edges.length} link
           {graph.edges.length === 1 ? '' : 's'}
+          {pairCount > 0 && ` · ${pairCount} vPC pair${pairCount === 1 ? '' : 's'}`}
+          {peerLinkCount > 0 && ` (${peerLinkCount} peer-link cable${peerLinkCount === 1 ? '' : 's'})`}
         </span>
         {graph.orphanDeviceIds.length > 0 && (
           <StatusChip status="minor">
@@ -519,6 +599,8 @@ function TopologyCanvas({
               onOrientation={setOrientation}
               aggregate={aggregate}
               onAggregate={setAggregate}
+              showServers={showServers}
+              onShowServers={toggleShowServers}
               sceneIsCustom={sceneIsCustom}
               onSnapScene={snapScene}
               anyCustom={anyCustom || legacyLayout}
@@ -544,7 +626,7 @@ function TopologyCanvas({
         className="flex-1 relative min-h-0 border-t overflow-hidden"
         onDoubleClick={onCanvasDoubleClick}
       >
-        <ReactFlow<TileNode, FanEdge>
+        <ReactFlow<CanvasNode, FanEdge>
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -696,6 +778,7 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
   const stacked = n.kind === 'group'
   const drillable = n.kind === 'fabric' || n.kind === 'group'
   const smart = !!n.device?.smart
+  const server = n.kind === 'server'
   // In the vertical layout spines/IPNs fan their links downward, straight
   // through a label placed under the tile — so their label sits on top.
   const vertical = sourcePosition === Position.Bottom || sourcePosition === undefined
@@ -709,6 +792,9 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
       )}
     >
       {n.label}
+      {server && n.sublabel && (
+        <span className="block text-[9px] font-normal opacity-80 tracking-normal">{n.sublabel}</span>
+      )}
     </div>
   )
   return (
@@ -719,7 +805,7 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
         data.dimmed && 'opacity-25'
       )}
       style={{ width: TILE_W, height: TILE_H }}
-      title={drillable ? 'Double-click to open · drag to move' : 'Drag to move'}
+      title={drillable ? 'Double-click to open · drag to move' : server ? 'Server symbol (per leaf or per vPC pair) · drag to move' : 'Drag to move'}
     >
       {labelAbove && label}
       <div className="relative">
@@ -733,7 +819,8 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
           className={cn(
             'relative size-14 chamfer-xs border bg-tile border-tile-border flex items-center justify-center',
             selected && 'border-hot shadow-[0_0_0_2px_var(--color-hot)]',
-            n.kind === 'device' && n.device?.model_id === 'unknown' && 'border-dashed'
+            n.kind === 'device' && n.device?.model_id === 'unknown' && 'border-dashed',
+            server && 'border-tile-border/60 bg-tile/60'
           )}
         >
           <Handle
@@ -781,9 +868,28 @@ function TileRenderer({ data, selected, sourcePosition, targetPosition }: NodePr
 
 function TileIcon({ kind, role }: { kind: SceneNode['kind']; role: SceneNode['role'] }) {
   if (kind === 'fabric') return <Globe className="size-full" strokeWidth={1.6} />
+  if (kind === 'server') return <ServerIcon className="size-full" strokeWidth={1.6} />
   if (kind === 'ipn' || role === 'ipn') return <RouterGlyph />
   if (role === 'spine') return <SpineGlyph />
   return <LeafGlyph />
+}
+
+// Phase 14 — dashed bracket behind a vPC pair that has no peer-link.
+function BracketRenderer({ data }: NodeProps<BracketNode>) {
+  return (
+    <div
+      className="relative pointer-events-none"
+      style={{ width: data.w, height: data.h, border: `1.5px dashed ${PEER_LINK_COLOR}`, opacity: 0.8 }}
+      aria-hidden="true"
+    >
+      <span
+        className="absolute -top-2.5 left-2 px-1 text-[9px] font-bold uppercase tracking-[0.18em] bg-background"
+        style={{ color: PEER_LINK_COLOR }}
+      >
+        {data.pair.label}
+      </span>
+    </div>
+  )
 }
 
 // Spine: a backbone bar fanning three links down to the leaf tier.
@@ -842,13 +948,32 @@ function FanEdgeRenderer({
   const index = data?.index ?? 0
   const siblings = data?.siblings ?? 1
   const count = data?.scene.count ?? 1
+  const kind = data?.scene.kind ?? 'fabric'
   const horizontal = sourcePosition === Position.Right || sourcePosition === Position.Left
   const off = (index - (siblings - 1) / 2) * 12
 
   let path: string
   let lx: number
   let ly: number
-  if (siblings <= 1) {
+  if (kind === 'vpc-peer-link') {
+    // Phase 14 — both ends are leaves on the same row, so the source's bottom
+    // handle and the target's top handle would run the cable straight through
+    // the tiles. Arc it under (right of, when horizontal) both tiles instead,
+    // ending on the target's far edge; the label sits at the bottom of the arc.
+    const box = 56 // icon tile size (size-14) — the handles sit on its edges
+    const dip = 58 + off
+    if (!horizontal) {
+      const ty = targetY + box
+      path = `M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + dip}, ${targetX} ${ty + dip}, ${targetX} ${ty}`
+      lx = (sourceX + targetX) / 2
+      ly = (sourceY + ty) / 2 + dip * 0.75
+    } else {
+      const tx = targetX + box
+      path = `M ${sourceX} ${sourceY} C ${sourceX + dip} ${sourceY}, ${tx + dip} ${targetY}, ${tx} ${targetY}`
+      lx = (sourceX + tx) / 2 + dip * 0.75
+      ly = (sourceY + targetY) / 2
+    }
+  } else if (siblings <= 1) {
     ;[path, lx, ly] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
   } else if (!horizontal) {
     const my = (sourceY + targetY) / 2
@@ -861,8 +986,15 @@ function FanEdgeRenderer({
     lx = mx
     ly = (sourceY + targetY) / 2 + off * 0.75
   }
-  const width = Math.min(1.5 + (count - 1) * 0.35, 6)
-  const showLabel = selected || (data?.showLabel ?? false)
+  const width = kind === 'server' ? 1 : Math.min(1.5 + (count - 1) * 0.35, 6) + (kind === 'vpc-peer-link' ? 1 : 0)
+  const showLabel = selected || (data?.showLabel ?? false) || kind === 'vpc-peer-link'
+  const stroke = selected
+    ? 'var(--hot)'
+    : kind === 'vpc-peer-link'
+      ? PEER_LINK_COLOR
+      : kind === 'server'
+        ? 'var(--muted-foreground)'
+        : 'var(--link)'
   return (
     <>
       <BaseEdge
@@ -871,14 +1003,17 @@ function FanEdgeRenderer({
         interactionWidth={14}
         style={{
           strokeWidth: selected ? width + 1 : width,
-          stroke: selected ? 'var(--hot)' : 'var(--link)',
-          opacity: selected ? 1 : 0.85
+          stroke,
+          opacity: selected ? 1 : kind === 'server' ? 0.6 : 0.85
         }}
       />
       {showLabel && (
         <EdgeLabelRenderer>
           <div
-            className="absolute pointer-events-none border border-link/50 bg-card px-1.5 py-0.5 text-[10px] font-mono font-semibold text-link chamfer-xs nodrag nopan"
+            className={cn(
+              'absolute pointer-events-none border bg-card px-1.5 py-0.5 text-[10px] font-mono font-semibold chamfer-xs nodrag nopan',
+              kind === 'vpc-peer-link' ? 'border-[#B85450]/60 text-[#B85450]' : 'border-link/50 text-link'
+            )}
             style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}
           >
             {data?.scene.label}
@@ -941,6 +1076,8 @@ function ActionsMenu({
   onOrientation,
   aggregate,
   onAggregate,
+  showServers,
+  onShowServers,
   sceneIsCustom,
   onSnapScene,
   anyCustom,
@@ -955,6 +1092,8 @@ function ActionsMenu({
   onOrientation(o: Orientation): void
   aggregate: boolean
   onAggregate(v: boolean): void
+  showServers: boolean
+  onShowServers(v: boolean): void
   sceneIsCustom: boolean
   onSnapScene(): void
   anyCustom: boolean
@@ -996,6 +1135,10 @@ function ActionsMenu({
       <button className={row} onClick={() => onAggregate(!aggregate)}>
         <span>Aggregate links</span>
         <Switch on={aggregate} />
+      </button>
+      <button className={row} onClick={() => onShowServers(!showServers)} title="One symbol per leaf or per vPC pair, at the switch level; saved for the PDF and Visio exports">
+        <span>Show servers</span>
+        <Switch on={showServers} />
       </button>
       <div className="my-1 border-t" />
       <div className={heading}>Positions</div>
@@ -1130,6 +1273,23 @@ function NodeDetails({
         <KV label="Role" value={dev.role.toUpperCase()} />
         <KV label="Model" value={<span className="font-mono">{dev.model_id}</span>} />
         {dev.smart && <KV label="Smart switch" value="Yes — integrated DPU" />}
+        {dev.role === 'leaf' && (
+          <KV
+            label="vPC pair"
+            value={
+              dev.pair_id ? (
+                <span>
+                  <span className="font-mono">{dev.pair_id}</span>{' '}
+                  <span className="text-xs text-muted-foreground">
+                    with <span className="font-mono">{dev.pair_peer ? (byId.get(dev.pair_peer)?.label ?? dev.pair_peer) : '?'}</span>
+                  </span>
+                </span>
+              ) : (
+                <span className="text-warn">unpaired</span>
+              )
+            }
+          />
+        )}
         {dev.pod_index != null && dev.role !== 'leaf' && <KV label="Pod" value={`Pod ${dev.pod_index + 1}`} />}
         <KV label="Rack" value={dev.rack ?? <Dash />} />
         <KV label="RU" value={dev.ru ?? <Dash />} />
@@ -1151,6 +1311,29 @@ function NodeDetails({
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" variant="outline" onClick={onGoToRack}>Rack View</Button>
           <Button size="sm" variant="outline" onClick={onGoToLinks}>Links</Button>
+        </div>
+      </div>
+    )
+  }
+
+  // Phase 14 — server symbol: which leaves it hangs from and what it stands for.
+  if (node.kind === 'server' && node.server) {
+    const leaves = node.server.leafIds.map((id) => byId.get(id)?.label ?? id)
+    return (
+      <div className="space-y-3 text-sm">
+        <div className="border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          One symbol stands for every host behind {node.server.dual ? 'this vPC pair' : 'this leaf'} — never one tile per server.
+        </div>
+        <KV label="Attachment" value={node.server.dual ? 'Dual-attached (vPC)' : 'Single-attached'} />
+        <KV label="Server model" value={node.server.modelId ? <span className="font-mono">{node.server.modelId}</span> : 'Generic (set it on the tier in Requirements)'} />
+        <KV label="NIC" value={node.sublabel ?? <Dash />} />
+        <KV label="Leaves" value={leaves.map((l) => <span key={l} className="font-mono block">{l}</span>)} />
+        <div className="flex flex-wrap gap-2 pt-1">
+          {node.server.leafIds.map((id) => (
+            <Button key={id} size="sm" variant="outline" onClick={() => onSelectDevice(id)}>
+              {byId.get(id)?.label ?? id}
+            </Button>
+          ))}
         </div>
       </div>
     )
@@ -1343,6 +1526,11 @@ function LegendPane({ onClose }: { onClose(): void }) {
             Stacked group (Spines / Leaves) — double-click to expand
           </li>
           <li className="flex items-center gap-2"><span className={glyph}><RouterGlyph /></span> IPN router (Multi-Pod)</li>
+          <li className="flex items-center gap-2"><span className={glyph}><ServerIcon className="size-full" strokeWidth={1.6} /></span> Servers — one symbol per leaf or per vPC pair (Actions → Show servers)</li>
+          <li className="flex items-center gap-2">
+            <span className="w-5 h-3.5 shrink-0" style={{ border: `1.5px dashed ${PEER_LINK_COLOR}` }} />
+            vPC pair without a peer-link (ACI, or peer-link off)
+          </li>
         </ul>
       </section>
       <section className="space-y-2">
@@ -1350,6 +1538,8 @@ function LegendPane({ onClose }: { onClose(): void }) {
         <ul className="space-y-2 text-sm">
           <li className="flex items-center gap-2"><span className="w-8 border-t-2 border-link" /> One cable</li>
           <li className="flex items-center gap-2"><span className="w-8 border-t-4 border-link" /> Aggregated cables (label shows count × speed)</li>
+          <li className="flex items-center gap-2"><span className="w-8 border-t-[3px]" style={{ borderColor: PEER_LINK_COLOR }} /> vPC peer-link (leaf ↔ leaf)</li>
+          <li className="flex items-center gap-2"><span className="w-8 border-t border-muted-foreground" /> Server NIC (one line per NIC)</li>
           <li className="flex items-center gap-2"><span className="w-8 border-t-2 border-hot" /> Selected</li>
         </ul>
       </section>

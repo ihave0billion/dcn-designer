@@ -1,9 +1,10 @@
 import { computeTier } from './tier'
 import { computeSpine } from './spine'
 import { checkUseCaseConstraints } from './use-case'
-import { placeRacks } from './rack'
+import { placeRacks, synthesizeLogicalLayout } from './rack'
 import { buildCandidates, IPN_RACK_NAME } from './multipod'
 import { pickIpnRouter } from './ipn'
+import { effectiveVpcSettings, pairLeaves, uplinkBudgetAfterPeerLink } from './vpc'
 import type {
   DesignResult,
   DesignSummary,
@@ -12,7 +13,8 @@ import type {
   SolverRequirements,
   SolverWarning,
   SpineResult,
-  TierResult
+  TierResult,
+  VpcSummary
 } from './types'
 
 function formatOversub(host_g: number, uplink_g: number): {
@@ -84,11 +86,26 @@ export function solve(
   const base_warnings: SolverWarning[] = []
 
   // ──────────────────────────────────────────────────────────────────
+  // Phase 14 — vPC peer-link reservation (decision 5): the peer-link takes
+  // its ports out of every leaf's uplink group before the uplink math runs.
+  // Everything below uses the effective uplinks_per_leaf.
+  // ──────────────────────────────────────────────────────────────────
+  const vpcSettings = effectiveVpcSettings(requirements.fabric)
+  const budget = uplinkBudgetAfterPeerLink(
+    requirements.fabric,
+    vpcSettings.members,
+    requirements.tiers,
+    context.switches
+  )
+  warnings.push(...budget.warnings)
+  const fabric = { ...requirements.fabric, uplinks_per_leaf: budget.effective }
+
+  // ──────────────────────────────────────────────────────────────────
   // Per-tier math (v8 rules 8, 13)
   // ──────────────────────────────────────────────────────────────────
   const tierResults: TierResult[] = []
   for (const t of requirements.tiers) {
-    const r = computeTier(t, requirements.fabric.uplinks_per_leaf, context.switches)
+    const r = computeTier(t, fabric.uplinks_per_leaf, context.switches)
     tierResults.push(r.result)
     warnings.push(...r.warnings)
     base_warnings.push(...r.warnings)
@@ -113,8 +130,8 @@ export function solve(
   const spineComp = computeSpine(
     tierResults,
     spineSw,
-    requirements.fabric.uplinks_per_leaf,
-    requirements.fabric.uplinks_per_spine,
+    fabric.uplinks_per_leaf,
+    fabric.uplinks_per_spine,
     context.breakout_pairs
   )
   warnings.push(...spineComp.warnings)
@@ -147,6 +164,28 @@ export function solve(
     deviceRacks
   )
   warnings.push(...rackResult.warnings)
+
+  // ──────────────────────────────────────────────────────────────────
+  // Phase 14 — leaf pairing (decision 2). Pairs follow the leaf numbering
+  // so they line up with the rack placement's two-per-rack grouping; the
+  // empty-inventory case pairs the same ids the topology synthesises.
+  // ──────────────────────────────────────────────────────────────────
+  const pairing = pairLeaves(
+    rackResult.layout.length > 0
+      ? rackResult.layout
+      : synthesizeLogicalLayout(spineComp.spine, tierResults, context.switches)
+  )
+  warnings.push(...pairing.warnings)
+  const vpc: VpcSummary = {
+    mode: vpcSettings.mode,
+    peer_link: vpcSettings.peer_link,
+    port_channel: vpcSettings.port_channel,
+    members: vpcSettings.members,
+    configured_uplinks_per_leaf: budget.configured,
+    effective_uplinks_per_leaf: budget.effective,
+    pairs: pairing.pairs,
+    unpaired: pairing.unpaired
+  }
 
   // ──────────────────────────────────────────────────────────────────
   // Roll up summary
@@ -199,7 +238,7 @@ export function solve(
     tiers: tierResults,
     spine_switch: spineSw,
     ipn_router,
-    fabric: requirements.fabric,
+    fabric,
     breakout_pairs: context.breakout_pairs,
     switches: context.switches,
     rack_inventory: deviceRacks,
@@ -217,13 +256,14 @@ export function solve(
       tierResults,
       spineComp.spine,
       spineComp.breakout,
-      requirements.fabric.uplinks_per_leaf
+      fabric.uplinks_per_leaf
     ),
     rack_layout: rackResult.layout,
     warnings,
     candidates: candidatesOut.candidates,
     primary_candidate_id: candidatesOut.primary_candidate_id,
-    committed_candidate_id: candidatesOut.primary_candidate_id
+    committed_candidate_id: candidatesOut.primary_candidate_id,
+    vpc
   }
 }
 

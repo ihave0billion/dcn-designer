@@ -179,13 +179,18 @@ const REQUIREMENTS: RequirementsFile = {
       endpoint_count: 128,
       switch_count: null,
       leaf_model_id: 'N9K-C93600CD-GX',
-      override_uplink_speed_g: null
+      override_uplink_speed_g: null,
+      server_model_id: null
     }
   ],
   fabric: {
     uplinks_per_leaf: 4,
     uplinks_per_spine: 2,
     spine_model_id: 'N9K-C9364D-GX2A',
+    mode: 'nxos-evpn',
+    peer_link_enabled: true,
+    peer_link_members: 2,
+    peer_link_port_channel: true,
     aci_multipod_allowed: true,
     ipn_router_model_id: null
   },
@@ -204,6 +209,7 @@ const REQUIREMENTS: RequirementsFile = {
 function link(id: string, target: string, rackB: string | null): CableLink {
   return {
     id,
+    kind: 'uplink',
     device_a: { rack: 'Rack A', device_id: 'spine-1', port: 'Eth1/1' },
     device_b: { rack: rackB, device_id: target, port: 'Eth1/49' },
     speed_g: 400,
@@ -233,6 +239,7 @@ const TOPOLOGY: TopologyGraph = {
   ],
   edges: LINKS.map((l) => ({
     id: l.id,
+    kind: 'uplink' as const,
     source: l.device_a.device_id,
     sourcePort: l.device_a.port,
     target: l.device_b.device_id,

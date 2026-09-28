@@ -19,10 +19,15 @@ import type { DesignResult } from '@domain'
 import {
   loadCableLinks,
   loadIpnRouters,
+  loadLeafPairs,
+  loadServersFile,
   loadSwitchesFile,
   loadTopologyLayout,
   type IpnRouterFileEntry
 } from '@/lib/library-io'
+import type { Server } from '@/schemas/servers'
+import type { LeafPair } from '@/schemas/leaf-pairs'
+import { serverInfoResolver, serverModelsIn } from '@/lib/server-symbols'
 import type { TopologyLayoutFile } from '@/schemas/topology-layout'
 import { extractTopology } from '@/lib/topology-extractor'
 import { applyNicknames } from '@/lib/device-nickname'
@@ -79,6 +84,9 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
   // Phase 13 — Visio export inputs + the substitution log of the last run.
   const [ipnRouters, setIpnRouters] = useState<IpnRouterFileEntry[]>([])
   const [layoutFile, setLayoutFile] = useState<TopologyLayoutFile | null>(null)
+  // Phase 14 — server symbols + vPC pairs travel into both exports.
+  const [servers, setServers] = useState<Server[]>([])
+  const [leafPairs, setLeafPairs] = useState<LeafPair[] | null>(null)
   const [visioBusy, setVisioBusy] = useState(false)
   const [visioReport, setVisioReport] = useState<{
     substitutions: string[]
@@ -119,14 +127,22 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
         .then((f) => f.switches)
         .catch(() => [] as Switch[]),
       loadIpnRouters(workspacePath).catch(() => [] as IpnRouterFileEntry[]),
-      loadTopologyLayout(projectPath).catch(() => null)
-    ]).then(([d, linkFile, sw, ipn, layout]) => {
+      loadTopologyLayout(projectPath).catch(() => null),
+      loadServersFile(workspacePath)
+        .then((f) => f.servers)
+        .catch(() => [] as Server[]),
+      loadLeafPairs(projectPath)
+        .then((f) => f?.pairs ?? null)
+        .catch(() => null)
+    ]).then(([d, linkFile, sw, ipn, layout, sv, pairs]) => {
       if (cancelled) return
       setDesign(d)
       setLinks(linkFile?.links ?? [])
       setSwitches(sw)
       setIpnRouters(ipn)
       setLayoutFile(layout)
+      setServers(sv)
+      setLeafPairs(pairs)
       setLoaded(true)
     })
     void refreshExports()
@@ -142,8 +158,11 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
     const smartModels = new Set(
       switches.filter((s) => s.capabilities.smart_switch || s.capabilities.dpu_integrated).map((s) => s.id)
     )
-    return applyNicknames(extractTopology(design, links), smartModels)
-  }, [design, links, switches])
+    return applyNicknames(extractTopology(design, links, leafPairs), smartModels)
+  }, [design, links, switches, leafPairs])
+
+  const serverInfo = useCallback(() => serverInfoResolver(design, servers), [design, servers])
+  const showServers = layoutFile?.show_servers ?? false
 
   const build = useCallback(async (): Promise<{ bytes: Uint8Array; name: string }> => {
     const graph = topologyGraph()
@@ -151,10 +170,10 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
     const generatedAt = new Date().toISOString()
     // Phase 13 — front panels for the topology page come from the stencil
     // bundle (rasterised masters / photos); absent bundle = chassis rectangles.
+    const resolve = serverInfo()
+    const modelIds = [...graph.nodes.map((n) => n.model_id), ...(showServers ? serverModelsIn(graph, resolve) : [])]
     const panelImages = workspacePath
-      ? await loadPanelImages(workspacePath, graph.nodes.map((n) => n.model_id), switches, ipnRouters).catch(
-          () => new Map()
-        )
+      ? await loadPanelImages(workspacePath, modelIds, switches, ipnRouters).catch(() => new Map())
       : new Map()
     const bytes = await renderDesignReportPdf({
       requirements,
@@ -164,10 +183,12 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
       topology: graph,
       topologyLayout: layoutFile,
       panelImages,
-      generatedAt
+      generatedAt,
+      showServers,
+      serverInfo: resolve
     })
     return { bytes, name: exportFileName(requirements.project.name, generatedAt) }
-  }, [design, links, requirements, switches, topologyGraph, workspacePath, ipnRouters, layoutFile])
+  }, [design, links, requirements, switches, topologyGraph, workspacePath, ipnRouters, layoutFile, serverInfo, showServers])
 
   const handleExport = useCallback(async () => {
     setBusy(true)
@@ -203,10 +224,13 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
       layoutFile,
       switches,
       ipnRouters,
-      appVersion: __APP_VERSION__
+      appVersion: __APP_VERSION__,
+      showServers,
+      serverInfo: serverInfo(),
+      servers
     })
     return { ...result, name: visioExportFileName(requirements.project.name, generatedAt) }
-  }, [design, workspacePath, switches, requirements, layoutFile, ipnRouters, topologyGraph])
+  }, [design, workspacePath, switches, requirements, layoutFile, ipnRouters, topologyGraph, showServers, serverInfo, servers])
 
   const handleExportVisio = useCallback(
     async (saveCopy: boolean) => {
@@ -353,8 +377,9 @@ export function ExportView({ requirements, projectPath, onGoToDesign }: ExportVi
           <CardTitle className="text-base">Export Visio topology</CardTitle>
           <CardDescription>
             A native, editable <code className="font-mono">.vsdx</code> of the expanded topology exactly
-            as the Topology tab draws it — every switch at its position, every link, port labels —
-            using official Cisco stencil masters where the library has one.
+            as the Topology tab draws it — every switch at its position, every link, port labels, vPC
+            peer-links in red{showServers ? ', the server symbols' : ''} — using official Cisco stencil
+            masters where the library has one.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

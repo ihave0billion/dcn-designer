@@ -74,6 +74,8 @@ function toDataUrl(bytes: Uint8Array, kind: 'png' | 'jpeg'): string {
   return `data:image/${kind};base64,${btoa(bin)}`
 }
 
+// `modelIds` may include server model ids (Phase 14 — the Show-servers
+// symbol): they resolve by name against the UCS masters in the same bundle.
 export async function loadPanelImages(
   workspacePath: string,
   modelIds: Iterable<string>,

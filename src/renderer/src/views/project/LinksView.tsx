@@ -4,6 +4,7 @@ import {
   Download,
   Eraser,
   GitFork,
+  Link2,
   Pencil,
   Plus,
   RotateCcw,
@@ -41,12 +42,22 @@ import type { CableLink, CableLinksFile } from '@/schemas/cable-links'
 import {
   cableLinksPath,
   deleteCableLinks,
+  deleteLeafPairs,
+  loadBreakoutPairs,
   loadCableLinks,
+  loadLeafPairs,
   loadOpticsFile,
   loadPatchPanels,
   loadSwitchesFile,
-  saveCableLinks
+  saveCableLinks,
+  saveLeafPairs,
+  type LeafPairsFile
 } from '@/lib/library-io'
+import { unpairedLeaves, validatePairs, type LeafPair } from '@/schemas/leaf-pairs'
+import { FABRIC_MODE_LABEL } from '@/schemas/project'
+import { seedCableLinks } from '@/lib/cable-links-seeder'
+import { cableKindLabel } from '@/lib/cable-bom'
+import type { BreakoutPair } from '@domain'
 import { useWorkspace } from '@/state/WorkspaceContext'
 import type { DesignResult } from '@domain'
 import {
@@ -61,12 +72,15 @@ interface LinksViewProps {
   onGoToDesign(): void
 }
 
-export function LinksView({ projectPath, onGoToDesign }: LinksViewProps) {
+export function LinksView({ requirements, projectPath, onGoToDesign }: LinksViewProps) {
   const { workspacePath } = useWorkspace()
   const [switches, setSwitches] = useState<Switch[]>([])
   const [design, setDesign] = useState<DesignResult | null>(null)
   const [file, setFile] = useState<CableLinksFile | null>(null)
   const [patchPanels, setPatchPanels] = useState<PatchPanel[]>([])
+  // Phase 14 — vPC pairs (leaf_pairs.yaml fork) + what a re-seed needs.
+  const [pairsFile, setPairsFile] = useState<LeafPairsFile | null>(null)
+  const [breakoutPairs, setBreakoutPairs] = useState<BreakoutPair[]>([])
   const [loaded, setLoaded] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -96,13 +110,17 @@ export function LinksView({ projectPath, onGoToDesign }: LinksViewProps) {
         }
       })(),
       loadCableLinks(projectPath).catch(() => null),
-      loadPatchPanels(workspacePath).catch(() => [] as PatchPanel[])
-    ]).then(([sw, d, links, panels]) => {
+      loadPatchPanels(workspacePath).catch(() => [] as PatchPanel[]),
+      loadLeafPairs(projectPath).catch(() => null),
+      loadBreakoutPairs(workspacePath).catch(() => [] as BreakoutPair[])
+    ]).then(([sw, d, links, panels, pairs, bp]) => {
       if (cancelled) return
       setSwitches(sw)
       setDesign(d)
       setFile(links)
       setPatchPanels(panels)
+      setPairsFile(pairs)
+      setBreakoutPairs(bp)
       setLoaded(true)
     })
     return () => {
@@ -260,6 +278,78 @@ export function LinksView({ projectPath, onGoToDesign }: LinksViewProps) {
     }
   }, [projectPath])
 
+  // ── vPC pairs (Phase 14) ─────────────────────────────────────────────
+  // The pairs in effect: the fork file, else the solver's pairing.
+  const effectivePairs: LeafPair[] = pairsFile?.pairs ?? design?.vpc?.pairs ?? []
+
+  // Re-seed cable_links.yaml with the given pairs when it is still
+  // solver-sourced. A user fork is left alone (the caller says so).
+  const reseedLinksForPairs = useCallback(
+    async (pairs: LeafPair[]): Promise<boolean> => {
+      if (!design || !workspacePath) return false
+      if (file && file.source === 'user') return false
+      const seeded = seedCableLinks({
+        design,
+        switches,
+        fabric: {
+          uplinks_per_leaf: design.vpc?.effective_uplinks_per_leaf ?? requirements.fabric.uplinks_per_leaf,
+          uplinks_per_spine: requirements.fabric.uplinks_per_spine
+        },
+        breakoutPairs,
+        patchPanels,
+        pairs
+      })
+      const next: CableLinksFile = {
+        schema_version: 1,
+        source: 'solver',
+        seeded_at: new Date().toISOString(),
+        forked_at: null,
+        links: seeded.links
+      }
+      await saveCableLinks(projectPath, next)
+      setFile(next)
+      return true
+    },
+    [design, workspacePath, file, switches, requirements.fabric, breakoutPairs, patchPanels, projectPath]
+  )
+
+  const handleSavePairs = useCallback(
+    async (pairs: LeafPair[]) => {
+      try {
+        const now = new Date().toISOString()
+        const next: LeafPairsFile = {
+          schema_version: 1,
+          source: 'user',
+          seeded_at: pairsFile?.seeded_at ?? null,
+          forked_at: pairsFile?.forked_at ?? now,
+          pairs
+        }
+        await saveLeafPairs(projectPath, next)
+        setPairsFile(next)
+        const reseeded = await reseedLinksForPairs(pairs)
+        setErr(
+          reseeded
+            ? null
+            : 'Pairs saved. cable_links.yaml is hand-edited, so its peer-links were not re-seeded — use "Reset to solver layout" then Generate design to re-seed.'
+        )
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [pairsFile, projectPath, reseedLinksForPairs]
+  )
+
+  const handleResetPairs = useCallback(async () => {
+    try {
+      await deleteLeafPairs(projectPath)
+      setPairsFile(null)
+      await reseedLinksForPairs(design?.vpc?.pairs ?? [])
+      setErr(null)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }, [projectPath, reseedLinksForPairs, design])
+
   // ── CSV export ───────────────────────────────────────────────────────
   const handleExport = useCallback(async () => {
     if (!file) return
@@ -347,6 +437,18 @@ export function LinksView({ projectPath, onGoToDesign }: LinksViewProps) {
 
       {/* Body */}
       <div className="flex-1 overflow-auto px-6 py-6 space-y-4 min-h-0">
+        {/* Phase 14 — vPC pairs */}
+        {design.vpc && (
+          <VpcPairsCard
+            vpc={design.vpc}
+            leaves={leaves}
+            pairs={effectivePairs}
+            forked={pairsFile?.source === 'user'}
+            onSave={handleSavePairs}
+            onReset={handleResetPairs}
+          />
+        )}
+
         {/* Empty (no file at all yet — design existed but no seed ran) */}
         {!hasFile && (
           <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/30">
@@ -400,8 +502,9 @@ export function LinksView({ projectPath, onGoToDesign }: LinksViewProps) {
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-28">ID</TableHead>
-                          <TableHead>Spine</TableHead>
-                          <TableHead>Leaf</TableHead>
+                          <TableHead className="w-28">Kind</TableHead>
+                          <TableHead>Spine / leaf A</TableHead>
+                          <TableHead>Leaf / leaf B</TableHead>
                           <TableHead className="w-16">Speed</TableHead>
                           <TableHead className="w-40">Optic</TableHead>
                           <TableHead className="w-44">Patch panel</TableHead>
@@ -412,6 +515,16 @@ export function LinksView({ projectPath, onGoToDesign }: LinksViewProps) {
                         {filtered.map((l) => (
                           <TableRow key={l.id} className="text-xs">
                             <TableCell className="font-mono">{l.id}</TableCell>
+                            <TableCell>
+                              <span
+                                className={cn(
+                                  'px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider chamfer-xs',
+                                  l.kind === 'vpc-peer-link' ? 'bg-[#B85450]/15 text-[#B85450]' : 'bg-muted text-muted-foreground'
+                                )}
+                              >
+                                {cableKindLabel(l.kind)}
+                              </span>
+                            </TableCell>
                             <TableCell>
                               <div className="font-medium">{l.device_a.device_id}</div>
                               <div className="text-muted-foreground font-mono">
@@ -432,12 +545,17 @@ export function LinksView({ projectPath, onGoToDesign }: LinksViewProps) {
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
                                 <button
-                                  className="opacity-70 hover:opacity-100"
+                                  className="opacity-70 hover:opacity-100 disabled:opacity-25 disabled:cursor-default"
+                                  disabled={l.kind === 'vpc-peer-link'}
                                   onClick={() => {
                                     setEditing(l)
                                     setDialogOpen(true)
                                   }}
-                                  title="Edit"
+                                  title={
+                                    l.kind === 'vpc-peer-link'
+                                      ? 'Peer-link ports come from the switch library and the vPC pairs card'
+                                      : 'Edit'
+                                  }
                                 >
                                   <Pencil className="size-3.5" />
                                 </button>
@@ -533,6 +651,163 @@ export function LinksView({ projectPath, onGoToDesign }: LinksViewProps) {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// vPC pairs card (Phase 14) — re-pick the members of any pair; an odd
+// leaf out is flagged. Saving forks leaf_pairs.yaml and re-seeds the
+// peer-links when cable_links.yaml is still solver-sourced.
+// ────────────────────────────────────────────────────────────────────
+
+function VpcPairsCard({
+  vpc,
+  leaves,
+  pairs,
+  forked,
+  onSave,
+  onReset
+}: {
+  vpc: NonNullable<DesignResult['vpc']>
+  leaves: FabricDevice[]
+  pairs: LeafPair[]
+  forked: boolean
+  onSave(pairs: LeafPair[]): Promise<void>
+  onReset(): Promise<void>
+}) {
+  const [draft, setDraft] = useState<LeafPair[]>(pairs)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => setDraft(pairs), [pairs])
+  const leafIds = leaves.map((l) => l.device_id)
+  const dirty = JSON.stringify(draft) !== JSON.stringify(pairs)
+  const problems = validatePairs(draft, leafIds)
+  const unpaired = unpairedLeaves(leafIds, draft)
+  const labelOf = (id: string): string => leaves.find((l) => l.device_id === id)?.label || id
+
+  function setMember(pairIdx: number, slot: 0 | 1, id: string): void {
+    setDraft((prev) =>
+      prev.map((p, i) => {
+        if (i !== pairIdx) return p
+        const members: [string, string] = [p.members[0], p.members[1]]
+        members[slot] = id
+        return { ...p, members }
+      })
+    )
+  }
+  function addPair(): void {
+    if (unpaired.length < 2) return
+    setDraft((prev) => [...prev, { id: `pair-${prev.length + 1}`, members: [unpaired[0], unpaired[1]] }])
+  }
+  function removePair(idx: number): void {
+    setDraft((prev) => prev.filter((_, i) => i !== idx).map((p, i) => ({ ...p, id: `pair-${i + 1}` })))
+  }
+  async function run(fn: () => Promise<void>): Promise<void> {
+    setBusy(true)
+    try {
+      await fn()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const peerLinkText = vpc.peer_link
+    ? `${vpc.members} × peer-link per pair${vpc.port_channel ? ' in a port-channel' : ''}`
+    : 'no peer-link (pairs are logical)'
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Link2 className="size-4" />
+            vPC leaf pairs
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            {forked && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 text-xs font-medium px-2.5 py-1">
+                <GitFork className="size-3.5" />
+                Forked — your pairs
+              </span>
+            )}
+            {forked && (
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(onReset)}>
+                <RotateCcw />
+                Reset to solver pairs
+              </Button>
+            )}
+            <Button variant="outline" size="sm" disabled={busy || unpaired.length < 2} onClick={addPair}>
+              <Plus />
+              Add pair
+            </Button>
+            <Button size="sm" disabled={busy || !dirty || problems.length > 0} onClick={() => void run(() => onSave(draft))}>
+              {busy ? 'Saving…' : 'Save pairs'}
+            </Button>
+          </div>
+        </div>
+        <CardDescription>
+          {FABRIC_MODE_LABEL[vpc.mode] ?? vpc.mode} · {peerLinkText} · {draft.length} pair{draft.length === 1 ? '' : 's'}
+          {vpc.effective_uplinks_per_leaf !== vpc.configured_uplinks_per_leaf &&
+            ` · uplinks/leaf reduced to ${vpc.effective_uplinks_per_leaf} (of ${vpc.configured_uplinks_per_leaf}) for the peer-link`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {draft.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No pairs — the design has fewer than two leaves of a model.</p>
+        ) : (
+          <div className="border rounded-md">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-24">Pair</TableHead>
+                  <TableHead>Leaf A</TableHead>
+                  <TableHead>Leaf B</TableHead>
+                  <TableHead className="w-12" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {draft.map((p, i) => (
+                  <TableRow key={p.id} className="text-xs">
+                    <TableCell className="font-mono">{p.id}</TableCell>
+                    {([0, 1] as const).map((slot) => (
+                      <TableCell key={slot}>
+                        <select
+                          className="h-8 w-full border bg-background px-2 text-xs font-mono chamfer-xs"
+                          value={p.members[slot]}
+                          onChange={(e) => setMember(i, slot, e.target.value)}
+                        >
+                          {leaves.map((l) => (
+                            <option key={l.device_id} value={l.device_id}>
+                              {labelOf(l.device_id)} · {l.model_id}
+                            </option>
+                          ))}
+                        </select>
+                      </TableCell>
+                    ))}
+                    <TableCell className="text-right">
+                      <button className="opacity-70 hover:opacity-100 text-destructive" title="Remove pair" onClick={() => removePair(i)}>
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        {unpaired.length > 0 && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Unpaired (odd leaf out, single-attached hosts only): {unpaired.map(labelOf).join(', ')}
+          </p>
+        )}
+        {problems.length > 0 && (
+          <ul className="text-xs text-destructive list-disc pl-5">
+            {problems.map((m) => (
+              <li key={m}>{m}</li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

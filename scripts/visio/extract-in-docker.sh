@@ -53,7 +53,7 @@ while IFS= read -r -d '' f; do packs+=(--pack "/in/stencils/$fam/${f#"$stencils"
 [ ${#packs[@]} -gt 0 ] || { echo "no .vssx under $stencils" >&2; exit 1; }
 
 docker run --rm "${vols[@]}" "$IMAGE" python3 /out/.tools/extract-masters.py \
-  "${packs[@]}" --switches /in/seed/switches.yaml --ipn /in/seed/ipn_routers.yaml \
+  "${packs[@]}" --switches /in/seed/switches.yaml --ipn /in/seed/ipn_routers.yaml --servers /in/seed/servers.yaml \
   "${img_arg[@]}" --out /out "$@"
 rm -rf "$out/.tools"
 echo "bundle: $out/library/visio"

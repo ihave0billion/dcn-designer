@@ -3,10 +3,12 @@ import type { ReactElement } from 'react'
 import type { DesignResult, OpticsBomScenario, SolverWarning } from '@domain'
 import { DEFAULT_SWITCH_POWER_W } from '@domain'
 import type { RequirementsFile } from '@/schemas/project'
+import { FABRIC_MODE_LABEL } from '@/schemas/project'
 import type { CableLink } from '@/schemas/cable-links'
 import type { Switch } from '@/schemas/switches'
 import type { TopologyGraph } from '@/lib/topology-extractor'
-import { buildCableBom, unresolvedLabel, type CableBom } from '@/lib/cable-bom'
+import { buildCableBom, cableKindLabel, unresolvedLabel, type CableBom } from '@/lib/cable-bom'
+import type { ServerInfoResolver } from '@/lib/server-symbols'
 import { buildDeviceBom, type DeviceBom } from '@/lib/device-bom'
 import { findCandidate } from '@/lib/design-projection'
 import type { TopologyLayoutFile } from '@/schemas/topology-layout'
@@ -34,6 +36,9 @@ export interface DesignReportInput {
   topologyLayout?: TopologyLayoutFile | null
   /** Phase 13 — model_id → rasterised front panel / product photo for the topology page. */
   panelImages?: PanelImages
+  /** Phase 14 — draw the Topology tab's server symbols (topology_layout.yaml show_servers). */
+  showServers?: boolean
+  serverInfo?: ServerInfoResolver
   /** ISO timestamp, passed in rather than read from the clock so the
    *  document is a pure function of its input (and testable). */
   generatedAt: string
@@ -159,6 +164,17 @@ function CoverPage({
           <Def label="RoCEv2" value={req.constraints.rocev2_required ? 'Required' : 'Not required'} />
           <Def label="License tier" value={req.constraints.license_tier ?? '—'} />
           <Def label="Multi-pod allowed" value={req.fabric.aci_multipod_allowed ? 'Yes' : 'No'} />
+          <Def label="Fabric mode" value={FABRIC_MODE_LABEL[req.fabric.mode] ?? req.fabric.mode} />
+          <Def
+            label="vPC peer-link"
+            value={
+              design.vpc
+                ? design.vpc.peer_link
+                  ? `${design.vpc.members} × per pair${design.vpc.port_channel ? ' (port-channel)' : ''}; ${design.vpc.pairs.length} pair${design.vpc.pairs.length === 1 ? '' : 's'}${design.vpc.unpaired.length ? `, ${design.vpc.unpaired.length} unpaired` : ''}`
+                  : `None (${design.vpc.pairs.length} logical pair${design.vpc.pairs.length === 1 ? '' : 's'})`
+                : '—'
+            }
+          />
           <Def label="Cable tray" value={req.cable_tray_m != null ? `${fmt(req.cable_tray_m)} m` : 'Not set'} />
           <Def label="Racks defined" value={fmt(req.racks.length)} />
           <Def
@@ -468,18 +484,20 @@ function BomPage({
           <View style={styles.table}>
             <View style={styles.trHead}>
               <Text style={[styles.th, { flex: 1.2 }, styles.right]}>Length</Text>
+              <Text style={[styles.th, { flex: 1.6 }]}>Kind</Text>
               <Text style={[styles.th, { flex: 1.2 }]}>Media</Text>
               <Text style={[styles.th, { flex: 1 }, styles.right]}>Speed</Text>
-              <Text style={[styles.th, { flex: 3 }]}>Optic</Text>
+              <Text style={[styles.th, { flex: 2.4 }]}>Optic</Text>
               <Text style={[styles.th, { flex: 1 }, styles.right]}>Qty</Text>
               <Text style={[styles.th, { flex: 1.4 }, styles.right]}>Total m</Text>
             </View>
             {cableBom.rows.map((r) => (
-              <View style={styles.tr} key={`${r.ordered_length_m}-${r.speed_g}-${r.optic_id ?? ''}`}>
+              <View style={styles.tr} key={`${r.ordered_length_m}-${r.kind}-${r.speed_g}-${r.optic_id ?? ''}`}>
                 <Text style={[styles.td, { flex: 1.2 }, styles.right]}>{r.ordered_length_m} m</Text>
+                <Text style={[styles.td, { flex: 1.6 }]}>{cableKindLabel(r.kind)}</Text>
                 <Text style={[styles.td, { flex: 1.2 }]}>{MEDIA_LABEL[r.media] ?? r.media}</Text>
                 <Text style={[styles.td, { flex: 1 }, styles.right]}>{fmt(r.speed_g)}G</Text>
-                <Text style={[styles.td, { flex: 3 }]}>{t(r.optic_id)}</Text>
+                <Text style={[styles.td, { flex: 2.4 }]}>{t(r.optic_id)}</Text>
                 <Text style={[styles.td, { flex: 1 }, styles.right]}>{fmt(r.count)}</Text>
                 <Text style={[styles.td, { flex: 1.4 }, styles.right]}>
                   {fmt(r.total_ordered_m)}
@@ -503,6 +521,9 @@ function BomPage({
             : 'Same-rack links are costed at 3 m. Set Cable Tray (m) in Requirements to cost cross-rack runs.'}
           {cableBom.user_specified_links > 0
             ? ` ${cableBom.user_specified_links} link(s) use a length entered by hand instead.`
+            : ''}
+          {cableBom.peer_link_links > 0
+            ? ` ${cableBom.peer_link_links} of the cables are vPC peer-links (leaf ↔ leaf, two optic/DAC ends each).`
             : ''}
         </Text>
         {cableBom.unresolved.map((u) => (
@@ -657,9 +678,12 @@ function RackPage({
 
 // Landscape LETTER minus margins.
 const TOPO_W = 792 - PAGE_MARGIN * 2
-const TOPO_MAX_H = 612 - PAGE_MARGIN * 2 - 64
+// Heading + subtitle above, legend (two rows at most) + note below.
+const TOPO_MAX_H = 612 - PAGE_MARGIN * 2 - 128
 // Tile width in scene px (lib/topology-hierarchy TILE_W) — for the label-legibility rule.
 const PANEL_TILE_W = 124
+// Phase 14 — the skill's peer-link red, shared with the Visio export.
+const PEER_LINK_COLOR = '#B85450'
 
 function TopologyPage({
   projectName,
@@ -696,6 +720,19 @@ function TopologyPage({
               viewBox={`0 0 ${page.width} ${page.height}`}
               style={{ position: 'absolute', left: 0, top: 0 }}
             >
+              {page.pairs.map((p) => (
+                <Rect
+                  key={`pair-${p.id}`}
+                  x={p.x}
+                  y={p.y}
+                  width={p.w}
+                  height={p.h}
+                  fill="none"
+                  stroke={PEER_LINK_COLOR}
+                  strokeWidth={Math.max(0.6, 0.6 / scale)}
+                  strokeDasharray="3 2"
+                />
+              ))}
               {page.edges.map((e) => (
                 <Line
                   key={e.id}
@@ -703,8 +740,14 @@ function TopologyPage({
                   y1={e.y1}
                   x2={e.x2}
                   y2={e.y2}
-                  stroke={COLORS.faint}
-                  strokeWidth={Math.max(0.6, 0.5 / scale)}
+                  stroke={e.kind === 'vpc-peer-link' ? PEER_LINK_COLOR : COLORS.faint}
+                  strokeWidth={
+                    e.kind === 'vpc-peer-link'
+                      ? Math.max(1.2, 1.2 / scale)
+                      : e.kind === 'server'
+                        ? Math.max(0.4, 0.35 / scale)
+                        : Math.max(0.6, 0.5 / scale)
+                  }
                   strokeDasharray={e.dashed ? '4 3' : undefined}
                 />
               ))}
@@ -716,7 +759,7 @@ function TopologyPage({
                     y={n.y}
                     width={n.w}
                     height={n.h}
-                    fill={ROLE_COLOR[n.role ?? ''] ?? COLORS.muted}
+                    fill={n.kind === 'server' ? ROLE_COLOR.server : (ROLE_COLOR[n.role ?? ''] ?? COLORS.muted)}
                     stroke={COLORS.rule}
                     strokeWidth={0.5}
                   />
@@ -752,14 +795,28 @@ function TopologyPage({
             )}
           </View>
           <View style={styles.legend}>
-            {(['spine', 'ipn', 'leaf'] as const).map((role) => (
-              <View style={styles.legendItem} key={role}>
-                <View style={[styles.legendSwatch, { backgroundColor: ROLE_COLOR[role] }]} />
-                <Text style={styles.legendLabel}>
-                  {role} ({page.counts[role]})
-                </Text>
+            {(['spine', 'ipn', 'leaf', 'server'] as const)
+              .filter((role) => role !== 'server' || page.counts.server > 0)
+              .map((role) => (
+                <View style={styles.legendItem} key={role}>
+                  <View style={[styles.legendSwatch, { backgroundColor: ROLE_COLOR[role] }]} />
+                  <Text style={styles.legendLabel}>
+                    {role} ({page.counts[role]})
+                  </Text>
+                </View>
+              ))}
+            {page.peerLinks > 0 ? (
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: PEER_LINK_COLOR }]} />
+                <Text style={styles.legendLabel}>vPC peer-link ({page.peerLinks})</Text>
               </View>
-            ))}
+            ) : null}
+            {page.pairs.length > 0 ? (
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: 'white', borderWidth: 0.6, borderColor: PEER_LINK_COLOR, borderStyle: 'dashed' }]} />
+                <Text style={styles.legendLabel}>vPC pair, no peer-link ({page.pairs.length})</Text>
+              </View>
+            ) : null}
           </View>
           {page.edgesOmitted ? (
             <Text style={styles.note}>
@@ -861,6 +918,8 @@ export function DesignReport({
   switches,
   topology,
   topologyLayout,
+  showServers,
+  serverInfo,
   panelImages,
   generatedAt
 }: DesignReportInput): ReactElement<DocumentProps> {
@@ -869,6 +928,8 @@ export function DesignReport({
   const projectName = requirements.project.name
   const ruById = new Map(switches.map((s) => [s.id, s.ru]))
   const topoPages = buildPdfScenePages(topology, projectName, topologyLayout ?? null, {
+    showServers: showServers ?? topologyLayout?.show_servers ?? false,
+    serverInfo,
     images: panelImages,
     ruOf: (id) => ruById.get(id) ?? null
   })

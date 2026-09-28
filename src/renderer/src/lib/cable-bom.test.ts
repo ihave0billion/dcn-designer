@@ -12,6 +12,7 @@ import type { CableLink } from '@/schemas/cable-links'
 
 function link(over: Partial<CableLink> & { id: string }): CableLink {
   return {
+    kind: 'uplink',
     device_a: { rack: 'Rack A', device_id: 'spine-1', port: 'Eth1/1' },
     device_b: { rack: 'Rack A', device_id: 'leaf-1', port: 'Eth1/49' },
     speed_g: 400,

@@ -1,9 +1,11 @@
 import type { Switch } from '@/schemas/switches'
+import type { Server } from '@/schemas/servers'
 import type { IpnRouterFileEntry } from '@domain'
 import type { TopologyLayoutFile } from '@/schemas/topology-layout'
 import type { TopologyGraph } from '@/lib/topology-extractor'
 import { buildScene, type Fabric, type Orientation } from '@/lib/topology-hierarchy'
 import { resolveScenePositions } from '@/lib/topology-scene-positions'
+import type { ServerInfoResolver } from '@/lib/server-symbols'
 import { MasterStore } from './master-store'
 import { resolveModel, type ModelResolution } from './resolve-model'
 import { Diagram } from './vsdx-writer'
@@ -35,6 +37,12 @@ export interface ExportTopologyVisioArgs {
   orientation?: Orientation
   /** Application version string for the title block. */
   appVersion?: string
+  // Phase 14 — draw the Topology tab's server symbols (topology_layout.yaml
+  // show_servers); `servers` supplies RU for the generic box, `serverInfo`
+  // the label/NIC data (see lib/server-symbols.ts).
+  showServers?: boolean
+  serverInfo?: ServerInfoResolver
+  servers?: Server[]
 }
 
 export interface ExportTopologyVisioResult {
@@ -72,8 +80,11 @@ function portKind(speedG: number, modelId: string): SchematicGroup['kind'] {
   return speedG >= 40 ? 'qsfp' : 'sfp'
 }
 
-function modelInfoFrom(switches: Switch[], ipnRouters: IpnRouterFileEntry[]): Map<string, ModelInfo> {
+function modelInfoFrom(switches: Switch[], ipnRouters: IpnRouterFileEntry[], servers: Server[] = []): Map<string, ModelInfo> {
   const out = new Map<string, ModelInfo>()
+  for (const s of servers) {
+    out.set(s.id, { hint: null, ru: s.ru ?? 1, groups: [] })
+  }
   for (const s of switches) {
     const groups: SchematicGroup[] = []
     for (const g of [s.primary, s.uplink, s.secondary_uplink]) {
@@ -108,7 +119,8 @@ export async function exportTopologyVisio(
   const orientation = args.orientation ?? 'vertical'
   const store = await MasterStore.open(args.workspacePath)
   const index = store?.index ?? null
-  const models = modelInfoFrom(args.switches, args.ipnRouters)
+  const models = modelInfoFrom(args.switches, args.ipnRouters, args.servers ?? [])
+  const serverIds = new Set((args.servers ?? []).map((s) => s.id))
   const diag = new Diagram({ title: `${args.projectName} — topology`, creator: 'DCN Designer' })
 
   const resolutions = new Map<string, ModelResolution>()
@@ -126,7 +138,9 @@ export async function exportTopologyVisio(
     if (!r) {
       r = resolveModel(modelId, info?.hint ?? null, index)
       resolutions.set(modelId, r)
-      note(r.note)
+      // Servers report their own fallback below (generic box, not a schematic
+      // switch panel); the generic "server" symbol is not a substitution at all.
+      if (!serverIds.has(modelId) && modelId !== 'server') note(r.note)
     }
     let panel: ResolvedPanel
     if (r.kind === 'master' && store) {
@@ -136,6 +150,10 @@ export async function exportTopologyVisio(
     } else if (r.kind === 'image' && store) {
       const img = await store.loadImage(r.imagePath)
       panel = { kind: 'image', bytes: img.bytes, imageKind: img.kind, widthIn: 19 }
+    } else if (serverIds.has(modelId) || modelId === 'server') {
+      // Phase 14 — no UCS master for this server model: generic box, reported.
+      panel = { kind: 'server-box', modelId: modelId === 'server' ? 'Servers' : modelId, ru: info?.ru ?? 1 }
+      if (modelId !== 'server') note(`${modelId}: no UCS stencil master; drawn as a generic server box`)
     } else {
       panel = {
         kind: 'schematic',
@@ -154,7 +172,12 @@ export async function exportTopologyVisio(
   const multi = args.fabrics.length > 1
 
   for (const fabric of args.fabrics) {
-    const scene = buildScene(args.graph, args.fabrics, { kind: 'devices', fabricId: fabric.id }, { aggregate: true })
+    const scene = buildScene(
+      args.graph,
+      args.fabrics,
+      { kind: 'devices', fabricId: fabric.id },
+      { aggregate: true, showServers: args.showServers, serverInfo: args.serverInfo }
+    )
     let { positions, custom } = resolveScenePositions(scene, args.layoutFile, orientation)
     if (!custom) {
       positions = resolveScenePositions(scene, null, orientation, { rowMax: VISIO_ROW_MAX }).positions
@@ -162,20 +185,25 @@ export async function exportTopologyVisio(
     const nodes: TopologyVisioPage['nodes'] = []
     for (const n of scene.nodes) {
       const p = positions.get(n.id) ?? { x: 0, y: 0 }
-      const modelId = n.device?.model_id ?? (n.kind === 'ipn' ? (n.sublabel ?? 'unknown') : 'unknown')
+      const modelId =
+        n.kind === 'server'
+          ? (n.server?.modelId ?? 'server')
+          : n.device?.model_id ?? (n.kind === 'ipn' ? (n.sublabel ?? 'unknown') : 'unknown')
       nodes.push({
         id: n.id,
         label: n.label,
         sublabel: n.sublabel,
-        role: n.role,
+        role: n.kind === 'server' ? 'server' : n.role,
         x: p.x,
         y: p.y,
         panel: await panelFor(modelId),
-        smart: !!n.device?.smart
+        smart: !!n.device?.smart,
+        modelId
       })
     }
     const edges: TopologyVisioPage['edges'] = scene.edges.map((e) => ({
       id: e.id,
+      kind: e.kind,
       source: e.source,
       target: e.target,
       count: e.count,
@@ -191,6 +219,7 @@ export async function exportTopologyVisio(
       subtitle: custom ? 'Positions: Topology tab (user layout)' : 'Positions: Topology tab (auto layout)',
       nodes,
       edges,
+      pairs: scene.pairs.filter((p) => p.bracket).map((p) => ({ id: p.id, memberIds: p.memberIds, label: p.label })),
       orientation
     })
   }
