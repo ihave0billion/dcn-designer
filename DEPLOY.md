@@ -1,5 +1,9 @@
 # Deploying DCN Designer
 
+> **Placeholders.** Addresses and hostnames in this file are examples: `192.0.2.x` is the
+> deployment LAN, `nas` is the ssh alias of the Docker host, `your-tailnet` is the Tailscale
+> tailnet name. Substitute your own.
+
 The app has two targets from one codebase:
 
 - **Desktop** — the original Electron build (`npm run dev`, `npm run build`). Unchanged.

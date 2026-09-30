@@ -500,7 +500,7 @@ patch-panel dropdown for the UI side moved to its own open item (Phase 6). Solve
 ### 2026-05-12 — git init? → resolved
 Repo initialized as DCN Designer **v1** (not v8 — user clarified the legacy spreadsheet is
 not part of this repo's history). Initial commit `b1b6d44` on `main`. Remote:
-[github.com/ihave0billion/dcn-designer](https://github.com/ihave0billion/dcn-designer) (private).
+[github.com/ihave0billion/dcn-designer](https://github.com/ihave0billion/dcn-designer) (public, MIT).
 Legacy `*.xlsx` and `Deliverables/` excluded via `.gitignore`; `v8-baseline` tag from an
 earlier interim commit was dropped before the recommit.
 
